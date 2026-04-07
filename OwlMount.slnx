@@ -1,0 +1,9 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/OwlMount.Core/OwlMount.Core.csproj" />
+    <Project Path="src/OwlMount.WinFspHost/OwlMount.WinFspHost.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/OwlMount.Tests/OwlMount.Tests.csproj" />
+  </Folder>
+</Solution>
