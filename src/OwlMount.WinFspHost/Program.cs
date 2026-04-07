@@ -2,6 +2,8 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using Fsp;
+using OwlCore.Storage;
+using OwlCore.Storage.Memory;
 using OwlCore.Storage.System.IO;
 using OwlMount.Core.Cache;
 using OwlMount.Core.Registry;
@@ -50,16 +52,30 @@ static class Program
         }
 
         // ── Resolve the root IFolder ──────────────────────────────────────────
-        string rootPath = path ?? Environment.CurrentDirectory;
-        if (!Directory.Exists(rootPath))
+        IFolder root;
+        string displayRoot;
+
+        if (provider.Equals("memory", StringComparison.OrdinalIgnoreCase))
         {
-            Console.Error.WriteLine($"Error: path does not exist: {rootPath}");
-            return 1;
+            // In-memory provider: starts empty, no path required.
+            root = new MemoryFolder(id: "memory-root", name: "memory-root");
+            displayRoot = "(in-memory, starts empty)";
+        }
+        else
+        {
+            string rootPath = path ?? Environment.CurrentDirectory;
+            if (!Directory.Exists(rootPath))
+            {
+                Console.Error.WriteLine($"Error: path does not exist: {rootPath}");
+                return 1;
+            }
+
+            root = new SystemFolder(rootPath);
+            displayRoot = rootPath;
         }
 
-        var root = new SystemFolder(rootPath);
         Console.WriteLine($"OwlMount — provider: {provider}");
-        Console.WriteLine($"  Root   : {rootPath}");
+        Console.WriteLine($"  Root   : {displayRoot}");
 
         // ── Build the VFS components ──────────────────────────────────────────
         var rangeReaders  = new RangeReaderRegistry();
@@ -262,12 +278,13 @@ static class Program
         Console.WriteLine("  owlmount list");
         Console.WriteLine();
         Console.WriteLine("Options (mount):");
-        Console.WriteLine("  --provider   Provider tag (default: systemio)");
-        Console.WriteLine("  --path       Root path for the provider (default: current directory)");
+        Console.WriteLine("  --provider   Provider tag (default: systemio). Built-in: systemio, memory");
+        Console.WriteLine("  --path       Root path for the provider (not used for 'memory'; default: current directory)");
         Console.WriteLine("  --letter     Drive letter to mount on (default: M)");
         Console.WriteLine();
         Console.WriteLine("Examples:");
         Console.WriteLine(@"  owlmount mount --provider systemio --path C:\Data --letter D");
+        Console.WriteLine("  owlmount mount --provider memory --letter R");
         Console.WriteLine("  owlmount unmount --letter D");
         Console.WriteLine("  owlmount list");
         return 1;

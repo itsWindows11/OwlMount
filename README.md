@@ -1,6 +1,6 @@
 # OwlMount
 
-A Windows-only .NET 9 console application that mounts any
+A Windows-only .NET 10 console application that mounts any
 [OwlCore.Storage](https://github.com/Arlodotexe/OwlCore.Storage) `IFolder` provider as a
 Windows drive letter using [WinFsp](https://winfsp.dev).
 
@@ -20,7 +20,7 @@ Windows drive letter using [WinFsp](https://winfsp.dev).
 
 ## Prerequisites
 
-1. **.NET 9 SDK** — <https://dot.net>
+1. **.NET 10 SDK** — <https://dot.net>
 2. **WinFsp** (Windows File System Proxy) must be installed on the host machine:
    * Download the latest MSI from <https://winfsp.dev/rel/>
    * Minimal install: *WinFsp Core* component is sufficient
@@ -36,37 +36,57 @@ dotnet build
 ## Running
 
 ```
-owlmount --provider systemio --path "C:\MyFolder" --letter X
+owlmount mount --provider systemio --path "C:\MyFolder" --letter X
 ```
 
 | Flag | Default | Description |
 |---|---|---|
-| `--provider` | `systemio` | Provider name tag (cosmetic; used to namespace the block cache) |
-| `--path` | current directory | Root path to expose. For `systemio` this is a local directory. |
+| `--provider` | `systemio` | Provider name tag. Built-in values: `systemio`, `memory`. Also used to namespace the block cache. |
+| `--path` | current directory | Root path to expose. Required for `systemio`; ignored for `memory`. |
 | `--letter` | `M` | Drive letter to mount (without the colon) |
 
-Press **Ctrl+C** to unmount cleanly.
+Press **Ctrl+C**, or run `owlmount unmount --letter <X>` from another terminal, to unmount cleanly.
+
+### Subcommands
+
+| Command | Description |
+|---|---|
+| `mount` | Mount a provider as a drive letter |
+| `unmount --letter <X>` | Unmount a running mount by drive letter |
+| `list` | List all active mounts and their PIDs |
 
 ### Example — mount `C:\Users\Alice\Documents` as `D:`
 
 ```bat
-owlmount --provider systemio --path "C:\Users\Alice\Documents" --letter D
+owlmount mount --provider systemio --path "C:\Users\Alice\Documents" --letter D
 ```
 
-Then open `D:\` in Explorer or any application.
+Then open `D:\` in Explorer or any application.  Unmount from a second terminal:
+
+```bat
+owlmount unmount --letter D
+```
+
+### Example — empty in-memory filesystem as `R:`
+
+```bat
+owlmount mount --provider memory --letter R
+```
+
+The drive starts completely empty.  Any files or folders you copy into `R:\` exist only in RAM and are gone when the process exits.
 
 ## Architecture
 
 ```
 OwlMount.sln
 ├── src/
-│   ├── OwlMount.Core/            Cross-platform .NET 9 library
+│   ├── OwlMount.Core/            Cross-platform .NET 10 library
 │   │   ├── Abstractions/         IRangeReader, ISizeProvider, PathIndexEntry
 │   │   ├── Cache/                BlockCache (disk-backed, block-sized reads)
 │   │   ├── Index/                PathIndex (in-memory normalized-path map)
 │   │   └── Registry/             RangeReaderRegistry, SizeProviderRegistry,
 │   │                             DefaultRangeReader, DefaultSizeProvider
-│   └── OwlMount.WinFspHost/      Windows-only .NET 9 console app
+│   └── OwlMount.WinFspHost/      Windows-only .NET 10 console app
 │       ├── OwlMountFileSystem.cs WinFsp FileSystemBase implementation
 │       ├── DirectoryCache.cs     TTL-based per-folder listing cache
 │       ├── Contexts.cs           FileContext / FolderContext open-handle objects
