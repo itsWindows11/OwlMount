@@ -34,21 +34,35 @@ public sealed class OwlMountFileSystem : FileSystemBase
     private const uint AttrReadOnly  = 0x00000001u; // FILE_ATTRIBUTE_READONLY
     private const uint AttrDirectory = 0x00000010u; // FILE_ATTRIBUTE_DIRECTORY
 
+    private readonly Action? _onDispatcherStopped;
+
     public OwlMountFileSystem(
         IFolder root,
         BlockCache blockCache,
         RangeReaderRegistry rangeReaders,
         SizeProviderRegistry? sizeProviders = null,
-        string? volumeLabel = null)
+        string? volumeLabel = null,
+        Action? onDispatcherStopped = null)
     {
-        _root          = root;
-        _index         = new PathIndex();
-        _dirCache      = new DirectoryCache();
-        _blockCache    = blockCache;
-        _rangeReaders  = rangeReaders;
-        _sizeProviders = sizeProviders ?? new SizeProviderRegistry();
-        _volumeLabel   = string.IsNullOrWhiteSpace(volumeLabel) ? "OwlMount" : volumeLabel;
+        _root                = root;
+        _index               = new PathIndex();
+        _dirCache            = new DirectoryCache();
+        _blockCache          = blockCache;
+        _rangeReaders        = rangeReaders;
+        _sizeProviders       = sizeProviders ?? new SizeProviderRegistry();
+        _volumeLabel         = string.IsNullOrWhiteSpace(volumeLabel) ? "OwlMount" : volumeLabel;
+        _onDispatcherStopped = onDispatcherStopped;
     }
+
+    // ── Lifecycle ─────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Called by WinFsp when the dispatcher thread exits — including when the user
+    /// ejects/unmounts the drive from Explorer or the system. We use this to signal
+    /// the main loop so the process exits cleanly.
+    /// </summary>
+    public override void DispatcherStopped(bool normally) =>
+        _onDispatcherStopped?.Invoke();
 
     // ── Volume info ───────────────────────────────────────────────────────────
 

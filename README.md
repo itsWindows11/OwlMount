@@ -15,8 +15,7 @@ Windows drive letter using [WinFsp](https://winfsp.dev).
   directory enumeration; avoids redundant provider look-ups
 * **Directory cache** — short TTL (15 s default) per-folder listing cache for
   snappy Explorer browsing
-* **System.IO example provider** — bundled via `OwlCore.Storage.System.IO`;
-  use a local folder as a quick sanity-check
+* **In-memory provider** — zero-config drive backed by `OwlCore.Storage.Memory`; great for testing and ephemeral scratch space
 
 ## Prerequisites
 
@@ -36,19 +35,18 @@ dotnet build
 ## Running
 
 ```
-owlmount mount --provider systemio --path "C:\MyFolder" --letter X
+owlmount mount --provider memory --letter R
 ```
 
 ### Mount options
 
 | Flag | Default | Description |
 |---|---|---|
-| `--provider` | `systemio` | Provider name. See table below. |
+| `--provider` | `memory` | Provider name. See table below. |
 | `--letter` | `M` | Drive letter to mount (without the colon) |
 | `--label` | *(auto)* | Volume label shown in Explorer (e.g. `"My Files"`) |
-| `--path` | current directory | Root path for `systemio`; MFS path for `kubo-mfs` |
 
-Press **Ctrl+C**, or run `owlmount unmount --letter <X>` from another terminal, to unmount cleanly.
+Pressing **Ctrl+C**, running `owlmount unmount --letter <X>` from another terminal, or ejecting/unmounting the drive from Windows Explorer all cleanly exit the process.
 
 ### Subcommands
 
@@ -62,8 +60,7 @@ Press **Ctrl+C**, or run `owlmount unmount --letter <X>` from another terminal, 
 
 | `--provider` | Extra flags | Description |
 |---|---|---|
-| `systemio` | `--path <dir>` | Local filesystem folder |
-| `memory` | *(none)* | Empty in-memory filesystem (lives until process exits) |
+| `memory` | *(none)* | Empty in-memory filesystem (default; lives until process exits) |
 | `kubo-mfs` | `--path <mfs-path>` `[--api-url]` | Kubo MFS (Mutable File System) |
 | `kubo-ipfs` | `--cid <CID>` `[--api-url]` | Immutable IPFS directory by CID |
 | `kubo-ipns` | `--ipns <address>` `[--api-url]` | IPNS-addressed directory |
@@ -72,25 +69,17 @@ Press **Ctrl+C**, or run `owlmount unmount --letter <X>` from another terminal, 
 
 > **OneDrive** is supported as a code-level provider (`OneDriveFolder` / `OneDriveFile` from `OwlCore.Storage.OneDrive`) but requires a pre-authenticated `GraphServiceClient` from MSAL — see the *Adding a custom provider* section.
 
-### Example — mount a local folder as `D:` with a custom label
-
-```bat
-owlmount mount --provider systemio --path "C:\Users\Alice\Documents" --letter D --label "Alice Docs"
-```
-
-Then open `D:\` in Explorer. Unmount from a second terminal:
-
-```bat
-owlmount unmount --letter D
-```
-
 ### Example — empty in-memory filesystem as `R:`
 
 ```bat
 owlmount mount --provider memory --letter R --label "RAM Drive"
 ```
 
-The drive starts completely empty. Any files or folders you copy into `R:\` exist only in RAM and are gone when the process exits.
+The drive starts completely empty. Any files or folders you copy into `R:\` exist only in RAM and are gone when the process exits. Unmount from a second terminal, or eject from Explorer:
+
+```bat
+owlmount unmount --letter R
+```
 
 ### Example — Kubo MFS as `K:`
 

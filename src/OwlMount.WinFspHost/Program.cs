@@ -9,7 +9,6 @@ using OwlCore.Kubo;
 using OwlCore.Storage;
 using OwlCore.Storage.AmazonS3;
 using OwlCore.Storage.Memory;
-using OwlCore.Storage.System.IO;
 using OwlMount.Core.Cache;
 using OwlMount.Core.Registry;
 using OwlMount.WinFspHost;
@@ -43,7 +42,7 @@ static class Program
 
     static async Task<int> RunMountAsync(string[] args)
     {
-        string  provider   = "systemio";
+        string  provider   = "memory";
         string  letter     = "M";
         string? label      = null;
         string? path       = null;
@@ -191,30 +190,16 @@ static class Program
                 break;
             }
 
-            // ── systemio (default) ────────────────────────────────────────────
+            // ── unknown ───────────────────────────────────────────────────────
             default:
-            {
-                if (!provider.Equals("systemio", StringComparison.OrdinalIgnoreCase))
-                    Console.Error.WriteLine(
-                        $"Warning: unknown provider '{provider}', falling back to 'systemio'.");
-
-                string rootPath = path ?? Environment.CurrentDirectory;
-                if (!Directory.Exists(rootPath))
-                {
-                    Console.Error.WriteLine($"Error: path does not exist: {rootPath}");
-                    return 1;
-                }
-
-                root        = new SystemFolder(rootPath);
-                displayRoot = rootPath;
-                break;
-            }
+                Console.Error.WriteLine(
+                    $"Error: unknown provider '{provider}'. Run 'owlmount' for help.");
+                return 1;
         }
 
         // Derive a default volume label from the provider name when none supplied
         string resolvedLabel = label ?? provider.ToUpperInvariant() switch
         {
-            "SYSTEMIO" => "OwlMount",
             "MEMORY"   => "OwlMount (Memory)",
             "KUBO-MFS" => "OwlMount (MFS)",
             "KUBO-IPFS"=> "OwlMount (IPFS)",
@@ -233,8 +218,20 @@ static class Program
         var sizeProviders = new SizeProviderRegistry();
         var blockCache    = new BlockCache(providerId: $"{provider}_{root.Id}");
 
+        // CTS shared by CancelKeyPress and DispatcherStopped so either path exits cleanly.
+        var cts = new CancellationTokenSource();
+
         var fs = new OwlMountFileSystem(
-            root, blockCache, rangeReaders, sizeProviders, volumeLabel: resolvedLabel);
+            root, blockCache, rangeReaders, sizeProviders,
+            volumeLabel: resolvedLabel,
+            onDispatcherStopped: () =>
+            {
+                // Fires when WinFsp stops the dispatcher — covers both Ctrl+C signals
+                // and the user ejecting/unmounting the drive from Explorer.
+                Console.WriteLine("\nDrive unmounted. Exiting…");
+                DeletePidFile(letter);
+                cts.Cancel();
+            });
 
         // ── Configure the WinFsp host ─────────────────────────────────────────
         var host = new FileSystemHost(fs)
@@ -278,8 +275,7 @@ static class Program
         Console.WriteLine($"Unmount with: owlmount unmount --letter {letter.TrimEnd(':').ToUpperInvariant()}");
         Console.WriteLine("Or press Ctrl+C.");
 
-        // ── Unmount on Ctrl+C ─────────────────────────────────────────────────
-        var cts = new CancellationTokenSource();
+        // ── Exit on Ctrl+C (cts is also cancelled by DispatcherStopped) ───────
         Console.CancelKeyPress += (_, e) =>
         {
             e.Cancel = true;
@@ -430,11 +426,10 @@ static class Program
         Console.WriteLine("  owlmount list");
         Console.WriteLine();
         Console.WriteLine("Mount options (all providers):");
-        Console.WriteLine("  --provider   systemio | memory | kubo-mfs | kubo-ipfs | kubo-ipns | s3 | nfs");
+        Console.WriteLine("  --provider   memory | kubo-mfs | kubo-ipfs | kubo-ipns | s3 | nfs  (default: memory)");
         Console.WriteLine("  --letter     Drive letter to mount on (default: M)");
         Console.WriteLine("  --label      Volume label shown in Explorer (default: auto)");
         Console.WriteLine();
-        Console.WriteLine("  systemio     --path <dir>");
         Console.WriteLine("  memory       (no extra flags; drive starts empty)");
         Console.WriteLine("  kubo-mfs     --path <mfs-path>  [--api-url http://127.0.0.1:5001]");
         Console.WriteLine("  kubo-ipfs    --cid <CID>        [--api-url http://127.0.0.1:5001]");
@@ -446,13 +441,12 @@ static class Program
         Console.WriteLine("               [--nfs-path <path>]");
         Console.WriteLine();
         Console.WriteLine("Examples:");
-        Console.WriteLine(@"  owlmount mount --provider systemio --path C:\Data --letter D --label ""My Data""");
         Console.WriteLine("  owlmount mount --provider memory --letter R");
         Console.WriteLine("  owlmount mount --provider kubo-mfs --path /my/dir --letter K --label IPFS");
         Console.WriteLine("  owlmount mount --provider kubo-ipfs --cid bafybei... --letter I");
         Console.WriteLine("  owlmount mount --provider s3 --bucket my-bucket --prefix data/ --letter S");
         Console.WriteLine("  owlmount mount --provider nfs --host 192.168.1.10 --export /share --letter N");
-        Console.WriteLine("  owlmount unmount --letter D");
+        Console.WriteLine("  owlmount unmount --letter R");
         Console.WriteLine("  owlmount list");
         return 1;
     }
