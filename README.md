@@ -2,7 +2,8 @@
 
 A Windows-only .NET 10 console application that mounts any
 [OwlCore.Storage](https://github.com/Arlodotexe/OwlCore.Storage) `IFolder` provider as a
-Windows drive letter using [WinFsp](https://winfsp.dev).
+Windows drive letter using the built-in
+[Windows Projected File System (ProjFS)](https://learn.microsoft.com/en-us/windows/win32/projfs/projected-file-system).
 
 ## Features (MVP)
 
@@ -20,9 +21,13 @@ Windows drive letter using [WinFsp](https://winfsp.dev).
 ## Prerequisites
 
 1. **.NET 10 SDK** — <https://dot.net>
-2. **WinFsp** (Windows File System Proxy) must be installed on the host machine:
-   * Download the latest MSI from <https://winfsp.dev/rel/>
-   * Minimal install: *WinFsp Core* component is sufficient
+2. **Windows 10 version 1809 (build 17763) or later** with the
+   *Windows Projected File System* optional feature enabled.
+   Run once in an elevated PowerShell prompt if not already enabled:
+   ```powershell
+   Enable-WindowsOptionalFeature -Online -FeatureName Client-ProjFS -NoRestart
+   ```
+   No third-party drivers or installers are required.
 
 ## Building
 
@@ -114,7 +119,7 @@ OwlMount.sln
 │   │   └── Registry/             RangeReaderRegistry, SizeProviderRegistry,
 │   │                             DefaultRangeReader, DefaultSizeProvider
 │   └── OwlMount.WinFspHost/      Windows-only .NET 10 console app
-│       ├── OwlMountFileSystem.cs WinFsp FileSystemBase implementation
+│       ├── OwlMountProvider.cs   ProjFS IRequiredCallbacks implementation
 │       ├── DirectoryCache.cs     TTL-based per-folder listing cache
 │       ├── Contexts.cs           FileContext / FolderContext open-handle objects
 │       └── Program.cs            CLI entry point

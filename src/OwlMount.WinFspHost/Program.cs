@@ -2,8 +2,8 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using Amazon.S3;
-using Fsp;
 using Ipfs.Http;
+using Microsoft.Windows.ProjFS;
 using NfsSharp;
 using OwlCore.Kubo;
 using OwlCore.Storage;
@@ -14,7 +14,7 @@ using OwlMount.Core.Registry;
 using OwlMount.WinFspHost;
 using OwlMount.WinFspHost.Providers.Nfs;
 
-[SupportedOSPlatform("windows")]
+[SupportedOSPlatform("windows10.0.17763.0")]
 static class Program
 {
     static async Task<int> Main(string[] args)
@@ -209,59 +209,68 @@ static class Program
             _          => "OwlMount",
         };
 
+        string driveLetter = letter.TrimEnd(':').ToUpperInvariant();
+        string mountPoint  = driveLetter + ":";
+
         Console.WriteLine($"OwlMount — provider: {provider}");
         Console.WriteLine($"  Root   : {displayRoot}");
         Console.WriteLine($"  Label  : {resolvedLabel}");
+        Console.WriteLine($"  Mount  : {mountPoint}\\");
+        Console.WriteLine();
 
         // ── Build the VFS components ──────────────────────────────────────────
         var rangeReaders  = new RangeReaderRegistry();
         var sizeProviders = new SizeProviderRegistry();
         var blockCache    = new BlockCache(providerId: $"{provider}_{root.Id}");
 
-        // CTS shared by CancelKeyPress and DispatcherStopped so either path exits cleanly.
-        var cts = new CancellationTokenSource();
+        var provider_ = new OwlMountProvider(root, blockCache, rangeReaders, sizeProviders);
 
-        var fs = new OwlMountFileSystem(
-            root, blockCache, rangeReaders, sizeProviders,
-            volumeLabel: resolvedLabel,
-            onDispatcherStopped: () =>
-            {
-                // Fires when WinFsp stops the dispatcher — covers both Ctrl+C signals
-                // and the user ejecting/unmounting the drive from Explorer.
-                Console.WriteLine("\nDrive unmounted. Exiting…");
-                DeletePidFile(letter);
-                cts.Cancel();
-            });
+        // ── Prepare the ProjFS virtualization root directory ──────────────────
+        string virtRoot = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "OwlMount", "VirtRoot", driveLetter);
 
-        // ── Configure the WinFsp host ─────────────────────────────────────────
-        var host = new FileSystemHost(fs)
+        // Start fresh — delete any leftover placeholder tree from a prior run.
+        try { Directory.Delete(virtRoot, recursive: true); } catch { /* best-effort */ }
+        Directory.CreateDirectory(virtRoot);
+
+        // ── Start ProjFS virtualization ───────────────────────────────────────
+        var vi = new VirtualizationInstance(
+            virtRoot,
+            poolThreadCount:          0,
+            concurrentThreadCount:    0,
+            enableNegativePathCache:  false,
+            notificationMappings:     Array.Empty<NotificationMapping>());
+
+        provider_.Instance = vi;
+
+        HResult markResult = VirtualizationInstance.MarkDirectoryAsVirtualizationRoot(virtRoot, vi.VirtualizationInstanceId);
+        if (markResult != HResult.Ok)
         {
-            FileSystemName           = "OwlMount",
-            SectorSize               = 512,
-            SectorsPerAllocationUnit = 1,
-            MaxComponentLength       = 255,
-            CasePreservedNames       = true,
-            CaseSensitiveSearch      = false,
-            UnicodeOnDisk            = true,
-            VolumeSerialNumber       = 0x4F574C4D, // "OWLM"
-            FileInfoTimeout          = 1000,
-            VolumeInfoTimeout        = 1000,
-            DirInfoTimeout           = 1000,
-        };
+            Console.Error.WriteLine($"Failed to mark virtualization root (HResult {markResult}).");
+            Console.Error.WriteLine(
+                "Ensure the 'Windows Projected File System' optional feature is enabled:");
+            Console.Error.WriteLine(
+                "  Enable-WindowsOptionalFeature -Online -FeatureName Client-ProjFS -NoRestart");
+            return 1;
+        }
 
-        string mountPoint = letter.TrimEnd(':') + ":";
-        Console.WriteLine($"  Mount  : {mountPoint}\\");
-        Console.WriteLine();
-
-        int mountResult = host.Mount(mountPoint);
-        if (mountResult < 0)
+        HResult startResult = vi.StartVirtualizing(provider_);
+        if (startResult != HResult.Ok)
         {
+            Console.Error.WriteLine($"Failed to start ProjFS virtualization (HResult {startResult}).");
+            return 1;
+        }
+
+        // ── Map the virtualization root to the requested drive letter ─────────
+        if (!DefineDosDevice(0, mountPoint, virtRoot))
+        {
+            int err = Marshal.GetLastWin32Error();
+            vi.StopVirtualizing();
             Console.Error.WriteLine(
-                $"Failed to mount at {mountPoint} (WinFsp error {mountResult}).");
+                $"Failed to map drive letter {mountPoint} (Win32 error {err}).");
             Console.Error.WriteLine(
-                "Ensure WinFsp is installed and the drive letter is not already in use.");
-            Console.Error.WriteLine(
-                "  WinFsp installer: https://winfsp.dev/rel/");
+                "Ensure the drive letter is not already in use.");
             return 1;
         }
 
@@ -272,16 +281,16 @@ static class Program
 
         Console.WriteLine($"Mounted successfully. Browsable at {mountPoint}\\");
         Console.WriteLine($"  PID    : {Environment.ProcessId}");
-        Console.WriteLine($"Unmount with: owlmount unmount --letter {letter.TrimEnd(':').ToUpperInvariant()}");
+        Console.WriteLine($"Unmount with: owlmount unmount --letter {driveLetter}");
         Console.WriteLine("Or press Ctrl+C.");
 
-        // ── Exit on Ctrl+C (cts is also cancelled by DispatcherStopped) ───────
+        // ── CTS shared between Ctrl+C and explicit unmount ────────────────────
+        var cts = new CancellationTokenSource();
+
         Console.CancelKeyPress += (_, e) =>
         {
             e.Cancel = true;
             Console.WriteLine("\nUnmounting…");
-            host.Unmount();
-            DeletePidFile(letter);
             cts.Cancel();
         };
 
@@ -290,6 +299,14 @@ static class Program
             await Task.Delay(Timeout.Infinite, cts.Token);
         }
         catch (OperationCanceledException) { /* expected */ }
+
+        // ── Cleanup ───────────────────────────────────────────────────────────
+        DefineDosDevice(DDD_REMOVE_DEFINITION, mountPoint, null);
+        vi.StopVirtualizing();
+        DeletePidFile(letter);
+
+        // Best-effort cleanup of the virtualization root directory.
+        try { Directory.Delete(virtRoot, recursive: true); } catch { /* best-effort */ }
 
         Console.WriteLine("Done.");
         return 0;
@@ -465,6 +482,13 @@ static class Program
     {
         try { File.Delete(GetPidFilePath(letter)); } catch { /* best-effort */ }
     }
+
+    // ── Win32: drive letter mapping ───────────────────────────────────────────
+
+    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    static extern bool DefineDosDevice(uint dwFlags, string lpDeviceName, string? lpTargetPath);
+
+    private const uint DDD_REMOVE_DEFINITION = 0x00000002u;
 
     // ── Win32 helpers for cross-process Ctrl+C ────────────────────────────────
 
