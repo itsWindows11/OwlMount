@@ -223,7 +223,7 @@ static class Program
         var sizeProviders = new SizeProviderRegistry();
         var blockCache    = new BlockCache(providerId: $"{provider}_{root.Id}");
 
-        var provider_ = new OwlMountProvider(root, blockCache, rangeReaders, sizeProviders);
+        var projFsProvider = new OwlMountProvider(root, blockCache, rangeReaders, sizeProviders);
 
         // ── Prepare the ProjFS virtualization root directory ──────────────────
         string virtRoot = Path.Combine(
@@ -242,7 +242,7 @@ static class Program
             enableNegativePathCache:  false,
             notificationMappings:     Array.Empty<NotificationMapping>());
 
-        provider_.Instance = vi;
+        projFsProvider.Instance = vi;
 
         HResult markResult = VirtualizationInstance.MarkDirectoryAsVirtualizationRoot(virtRoot, vi.VirtualizationInstanceId);
         if (markResult != HResult.Ok)
@@ -255,7 +255,7 @@ static class Program
             return 1;
         }
 
-        HResult startResult = vi.StartVirtualizing(provider_);
+        HResult startResult = vi.StartVirtualizing(projFsProvider);
         if (startResult != HResult.Ok)
         {
             Console.Error.WriteLine($"Failed to start ProjFS virtualization (HResult {startResult}).");
@@ -301,12 +301,15 @@ static class Program
         catch (OperationCanceledException) { /* expected */ }
 
         // ── Cleanup ───────────────────────────────────────────────────────────
-        DefineDosDevice(DDD_REMOVE_DEFINITION, mountPoint, null);
+        if (!DefineDosDevice(DDD_REMOVE_DEFINITION, mountPoint, null))
+            Console.Error.WriteLine(
+                $"Warning: failed to remove drive letter {mountPoint} (Win32 error {Marshal.GetLastWin32Error()}).");
         vi.StopVirtualizing();
         DeletePidFile(letter);
 
         // Best-effort cleanup of the virtualization root directory.
-        try { Directory.Delete(virtRoot, recursive: true); } catch { /* best-effort */ }
+        try { Directory.Delete(virtRoot, recursive: true); }
+        catch (Exception ex) { Console.Error.WriteLine($"Warning: could not delete virtualization root '{virtRoot}': {ex.Message}"); }
 
         Console.WriteLine("Done.");
         return 0;

@@ -34,6 +34,11 @@ public sealed class OwlMountProvider : IRequiredCallbacks
     /// </summary>
     internal VirtualizationInstance? Instance { get; set; }
 
+    /// <summary>Throws if <see cref="Instance"/> has not been set yet.</summary>
+    private VirtualizationInstance RequireInstance() =>
+        Instance ?? throw new InvalidOperationException(
+            "VirtualizationInstance has not been set. Assign OwlMountProvider.Instance before starting virtualization.");
+
     private readonly ConcurrentDictionary<Guid, EnumerationState> _enumerations = new();
 
     public OwlMountProvider(
@@ -194,7 +199,7 @@ public sealed class OwlMountProvider : IRequiredCallbacks
             size = entry.Size ?? 0;
         }
 
-        return Instance!.WritePlaceholderInfo(
+        return RequireInstance().WritePlaceholderInfo(
             relativePath:    relativePath,
             creationTime:    entry.CreatedAt?.DateTime ?? DateTime.MinValue,
             lastAccessTime:  (entry.LastModifiedAt ?? entry.CreatedAt)?.DateTime ?? DateTime.MinValue,
@@ -226,7 +231,7 @@ public sealed class OwlMountProvider : IRequiredCallbacks
 
         IRangeReader reader = _rangeReaders.GetReader(file);
 
-        IWriteBuffer writeBuffer = Instance!.CreateWriteBuffer(
+        IWriteBuffer writeBuffer = RequireInstance().CreateWriteBuffer(
             byteOffset, length,
             out ulong alignedByteOffset, out uint alignedLength);
 
@@ -240,7 +245,7 @@ public sealed class OwlMountProvider : IRequiredCallbacks
             if (read > 0)
                 Marshal.Copy(tmp, 0, writeBuffer.Pointer, read);
 
-            return Instance!.WriteFileData(dataStreamId, writeBuffer, alignedByteOffset, (uint)read);
+            return RequireInstance().WriteFileData(dataStreamId, writeBuffer, alignedByteOffset, (uint)read);
         }
         finally
         {
