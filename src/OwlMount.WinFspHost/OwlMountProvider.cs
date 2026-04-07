@@ -6,6 +6,7 @@ using OwlCore.Storage;
 using OwlMount.Core.Abstractions;
 using OwlMount.Core.Cache;
 using OwlMount.Core.Index;
+using OwlMount.Core.IO;
 using OwlMount.Core.Registry;
 
 namespace OwlMount.WinFspHost;
@@ -145,7 +146,7 @@ public sealed class OwlMountProvider : IRequiredCallbacks
 
             // Apply wildcard filter (case-insensitive, ? and * supported)
             if (!string.IsNullOrEmpty(filter) && filter != "*" &&
-                !WildcardMatch(filter, entry.Name))
+                !WildcardPattern.Match(filter, entry.Name))
             {
                 state.Index++;
                 continue;
@@ -368,40 +369,6 @@ public sealed class OwlMountProvider : IRequiredCallbacks
                 return new DateTimeOffset(v.Value, TimeSpan.Zero);
         }
         return null;
-    }
-
-    // ── Wildcard matching ─────────────────────────────────────────────────────
-
-    private static bool WildcardMatch(string pattern, string name)
-    {
-        ReadOnlySpan<char> p = pattern.AsSpan();
-        ReadOnlySpan<char> n = name.AsSpan();
-        return WildcardMatchCore(p, n);
-    }
-
-    private static bool WildcardMatchCore(ReadOnlySpan<char> p, ReadOnlySpan<char> n)
-    {
-        while (true)
-        {
-            if (p.IsEmpty) return n.IsEmpty;
-
-            if (p[0] == '*')
-            {
-                p = p[1..];
-                if (p.IsEmpty) return true;
-                for (int i = 0; i <= n.Length; i++)
-                    if (WildcardMatchCore(p, n[i..])) return true;
-                return false;
-            }
-
-            if (n.IsEmpty) return false;
-
-            if (p[0] != '?' && char.ToUpperInvariant(p[0]) != char.ToUpperInvariant(n[0]))
-                return false;
-
-            p = p[1..];
-            n = n[1..];
-        }
     }
 
     // ── Enumeration state ─────────────────────────────────────────────────────
