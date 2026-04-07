@@ -22,7 +22,6 @@ public sealed class OwlMountProvider : IRequiredCallbacks
 {
     private readonly IFolder _root;
     private readonly PathIndex _index;
-    private readonly DirectoryCache _dirCache;
     private readonly BlockCache _blockCache;
     private readonly RangeReaderRegistry _rangeReaders;
     private readonly SizeProviderRegistry _sizeProviders;
@@ -49,7 +48,6 @@ public sealed class OwlMountProvider : IRequiredCallbacks
     {
         _root         = root;
         _index        = new PathIndex();
-        _dirCache     = new DirectoryCache();
         _blockCache   = blockCache;
         _rangeReaders = rangeReaders;
         _sizeProviders = sizeProviders ?? new SizeProviderRegistry();
@@ -58,68 +56,57 @@ public sealed class OwlMountProvider : IRequiredCallbacks
     // ── IRequiredCallbacks ────────────────────────────────────────────────────
 
     /// <summary>
-    /// Called when the OS begins enumerating a directory. Returns cached listings when
-    /// available; otherwise fetches, sorts, and caches the result for reuse.
+    /// Called when the OS begins enumerating a directory. Fetches, sorts, and indexes
+    /// the listing in a single pass so subsequent <see cref="GetDirectoryEnumerationCallback"/>
+    /// calls are fast.
     /// </summary>
     public HResult StartDirectoryEnumerationCallback(
         int commandId, Guid enumerationId, string relativePath,
         uint triggeringProcessId, string triggeringProcessImageFileName)
     {
         string norm = NormalizeProjFsPath(relativePath);
-
-        // Return the cached listing if it is still valid to avoid redundant provider calls.
-        IReadOnlyList<DirectoryEntry>? cached = _dirCache.TryGet(norm);
-        if (cached is not null)
-        {
-            _enumerations[enumerationId] = new EnumerationState(cached);
-            return HResult.Ok;
-        }
-
         IFolder? folder = string.IsNullOrEmpty(norm) ? _root : ResolveFolder(norm);
         if (folder is null) return HResult.FileNotFound;
 
-        List<IStorableChild> items;
+        List<DirectoryEntry> entries;
         try
         {
-            items = folder.GetItemsAsync()
+            entries = folder.GetItemsAsync()
                 .ToBlockingEnumerable()
                 .OrderBy(x => x.Name, StringComparer.OrdinalIgnoreCase)
+                .Select(item =>
+                {
+                    bool isDir = item is IFolder;
+                    DateTimeOffset? created  = GetCreatedAt(item);
+                    DateTimeOffset? modified = GetLastModifiedAt(item);
+
+                    string childPath = string.IsNullOrEmpty(norm)
+                        ? item.Name
+                        : norm + "/" + item.Name;
+
+                    _index.AddOrUpdate(childPath, new PathIndexEntry
+                    {
+                        Id             = item.Id,
+                        Name           = item.Name,
+                        IsFile         = !isDir,
+                        CreatedAt      = created,
+                        LastModifiedAt = modified,
+                    });
+
+                    return new DirectoryEntry(
+                        item.Name,
+                        isDir,
+                        0,
+                        created  ?? DateTimeOffset.UnixEpoch,
+                        modified ?? DateTimeOffset.UnixEpoch);
+                })
                 .ToList();
         }
         catch
         {
-            items = new List<IStorableChild>();
+            entries = new List<DirectoryEntry>();
         }
 
-        var entries = new List<DirectoryEntry>(items.Count);
-        foreach (IStorableChild item in items)
-        {
-            bool isDir = item is IFolder;
-            DateTimeOffset? created  = GetCreatedAt(item);
-            DateTimeOffset? modified = GetLastModifiedAt(item);
-
-            string childPath = string.IsNullOrEmpty(norm)
-                ? item.Name
-                : norm + "/" + item.Name;
-
-            _index.AddOrUpdate(childPath, new PathIndexEntry
-            {
-                Id             = item.Id,
-                Name           = item.Name,
-                IsFile         = !isDir,
-                CreatedAt      = created,
-                LastModifiedAt = modified,
-            });
-
-            entries.Add(new DirectoryEntry(
-                item.Name,
-                isDir,
-                0,
-                created  ?? DateTimeOffset.UnixEpoch,
-                modified ?? DateTimeOffset.UnixEpoch));
-        }
-
-        _dirCache.Set(norm, entries);
         _enumerations[enumerationId] = new EnumerationState(entries);
         return HResult.Ok;
     }
