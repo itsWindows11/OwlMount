@@ -1,34 +1,48 @@
+using System.Runtime.Versioning;
+using System.Text;
+using Microsoft.Windows.ProjFS;
 using OwlCore.Storage;
 using OwlCore.Storage.Memory;
 using OwlCore.Storage.System.IO;
+using OwlMount.Core.Cache;
+using OwlMount.Core.Registry;
+using OwlMount.WinFspHost;
 
 namespace OwlMount.Tests;
 
 /// <summary>
-/// Verifies that <see cref="MemoryFolder"/> (the "projected in-memory filesystem")
-/// and <see cref="SystemFolder"/> (normal local files on disk) behave 1:1 when
-/// accessed through the same <see cref="IFolder"/> API that <c>OwlMountProvider</c>
-/// uses internally.
+/// Compares a <see cref="SystemFolder"/> backed by a ProjFS virtualization root
+/// (whose data comes from an in-memory <see cref="MemoryFolder"/>) against a
+/// <see cref="SystemFolder"/> on a normal local temp directory — verifying
+/// completely 1:1 behavior through the OS <see cref="IFolder"/> API.
 /// <para>
-/// Each test is parameterized with <see cref="FolderBackend"/> so failures are
-/// immediately attributed to one or both backends.
+/// All tests require Windows 10 1803+ (build 17763) with the ProjFS optional feature
+/// enabled (<c>Client-ProjFS</c>). Tests skip silently on other platforms.
 /// </para>
 /// </summary>
+[SupportedOSPlatform(OsPlatform)]
 public sealed class FolderContractTests : IAsyncLifetime
 {
-    /// <summary>Selects which <see cref="IFolder"/> implementation to test.</summary>
-    public enum FolderBackend { Memory, LocalFilesystem }
+    // ── Minimum OS version for ProjFS ─────────────────────────────────────────
 
-    // Shared tree used by every test:
+    private const int    OsMajor     = 10;
+    private const int    OsMinor     = 0;
+    private const int    OsBuild     = 17763; // Windows 10 1803
+    private const string OsPlatform  = "windows10.0.17763.0";
+
+    private static bool IsProjFsSupported() =>
+        OperatingSystem.IsWindowsVersionAtLeast(OsMajor, OsMinor, OsBuild);
+
+    // ── Shared tree layout ────────────────────────────────────────────────────
     //   root/
-    //     alpha.txt
-    //     Beta.txt      ← mixed case to exercise case-insensitive sort
+    //     alpha.txt       ("alpha content")
+    //     Beta.txt        ("beta content")   ← mixed case
+    //     zZz.txt         ("zzz content")    ← mixed case
     //     gamma/
-    //       inner.txt
+    //       inner.txt     ("inner content")
     //       deep/
-    //         bottom.txt
-    //     zZz.txt       ← mixed case
-    //     empty/        ← no children
+    //         bottom.txt  ("bottom content")
+    //     empty/          ← no children
 
     private const string FileAlpha  = "alpha.txt";
     private const string FileBeta   = "Beta.txt";
@@ -39,71 +53,180 @@ public sealed class FolderContractTests : IAsyncLifetime
     private const string FileInner  = "inner.txt";
     private const string FileBottom = "bottom.txt";
 
-    // Expected names from the root after case-insensitive alphabetical sort:
-    private static readonly string[] ExpectedRootNamesSorted =
+    private static readonly (string Name, string Content)[] RootFiles =
+    [
+        (FileAlpha, "alpha content"),
+        (FileBeta,  "beta content"),
+        (FileZzz,   "zzz content"),
+    ];
+
+    private static readonly (string Name, string Content)[] GammaFiles =
+        [(FileInner, "inner content")];
+
+    private static readonly (string Name, string Content)[] DeepFiles =
+        [(FileBottom, "bottom content")];
+
+    // Expected names from root after case-insensitive alphabetical sort
+    private static readonly string[] ExpectedRootSorted =
         [FileAlpha, FileBeta, DirEmpty, DirGamma, FileZzz];
 
-    private string? _tempDir;
+    // ── Per-test state ────────────────────────────────────────────────────────
+
+    private SystemFolder?           _local;
+    private SystemFolder?           _projected;
+    private string?                 _localRoot;
+    private string?                 _projFsRoot;
+    private string?                 _blockCacheDir;
+    private VirtualizationInstance? _vi;
 
     // ── IAsyncLifetime ────────────────────────────────────────────────────────
 
-    public Task InitializeAsync() => Task.CompletedTask;
+    public async Task InitializeAsync()
+    {
+        if (OperatingSystem.IsWindowsVersionAtLeast(OsMajor, OsMinor, OsBuild))
+            await SetUpTreesAsync();
+    }
 
     public Task DisposeAsync()
     {
-        if (_tempDir is not null && Directory.Exists(_tempDir))
-        {
-            try { Directory.Delete(_tempDir, recursive: true); }
-            catch { /* best-effort */ }
-        }
+        if (OperatingSystem.IsWindowsVersionAtLeast(OsMajor, OsMinor, OsBuild))
+            StopProjFs();
         return Task.CompletedTask;
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
-    /// <summary>
-    /// Builds the reference folder tree in either an in-memory or on-disk backend.
-    /// </summary>
-    private async Task<IFolder> BuildTreeAsync(FolderBackend backend)
+    /// <summary>Returns <c>true</c> when the current test should be skipped.</summary>
+    private bool ShouldSkip() => _local is null || _projected is null;
+
+    private async Task SetUpTreesAsync()
     {
-        if (backend == FolderBackend.Memory)
+        _local     = await BuildLocalTreeAsync();
+        _projected = await BuildProjectedTreeAsync();
+    }
+
+    private async Task<SystemFolder> BuildLocalTreeAsync()
+    {
+        _localRoot = TempDir("Local");
+
+        foreach (var (name, content) in RootFiles)
+            await File.WriteAllTextAsync(Path.Combine(_localRoot, name), content, Encoding.UTF8);
+
+        string gammaDir = Path.Combine(_localRoot, DirGamma);
+        Directory.CreateDirectory(gammaDir);
+        foreach (var (name, content) in GammaFiles)
+            await File.WriteAllTextAsync(Path.Combine(gammaDir, name), content, Encoding.UTF8);
+
+        string deepDir = Path.Combine(gammaDir, DirDeep);
+        Directory.CreateDirectory(deepDir);
+        foreach (var (name, content) in DeepFiles)
+            await File.WriteAllTextAsync(Path.Combine(deepDir, name), content, Encoding.UTF8);
+
+        Directory.CreateDirectory(Path.Combine(_localRoot, DirEmpty));
+
+        return new SystemFolder(_localRoot);
+    }
+
+    private async Task<SystemFolder> BuildProjectedTreeAsync()
+    {
+        MemoryFolder memRoot = await BuildMemoryTreeAsync();
+
+        _blockCacheDir = TempDir("Cache");
+        var blockCache    = new BlockCache("contract-test", cacheDir: _blockCacheDir);
+        var rangeReaders  = new RangeReaderRegistry();
+        var sizeProviders = new SizeProviderRegistry();
+        var provider      = new OwlMountProvider(memRoot, blockCache, rangeReaders, sizeProviders);
+
+        _projFsRoot = TempDir("ProjFs");
+
+        _vi = new VirtualizationInstance(
+            _projFsRoot,
+            poolThreadCount:         0,
+            concurrentThreadCount:   0,
+            enableNegativePathCache: false,
+            notificationMappings:    Array.Empty<NotificationMapping>());
+
+        provider.Instance = _vi;
+
+        HResult mark = VirtualizationInstance.MarkDirectoryAsVirtualizationRoot(
+            _projFsRoot, _vi.VirtualizationInstanceId);
+
+        if (mark != HResult.Ok)
+            throw new InvalidOperationException(
+                $"MarkDirectoryAsVirtualizationRoot failed ({mark}). " +
+                "Enable ProjFS: Enable-WindowsOptionalFeature -Online -FeatureName Client-ProjFS");
+
+        HResult start = _vi.StartVirtualizing(provider);
+        if (start != HResult.Ok)
+            throw new InvalidOperationException($"StartVirtualizing failed ({start}).");
+
+        return new SystemFolder(_projFsRoot);
+    }
+
+    private static async Task<MemoryFolder> BuildMemoryTreeAsync()
+    {
+        var root  = new MemoryFolder("root", "root");
+        var gamma = (IModifiableFolder)await root.CreateFolderAsync(DirGamma, overwrite: false);
+        var deep  = (IModifiableFolder)await gamma.CreateFolderAsync(DirDeep, overwrite: false);
+        await root.CreateFolderAsync(DirEmpty, overwrite: false);
+
+        await WriteMemoryFilesAsync(root,  RootFiles);
+        await WriteMemoryFilesAsync(gamma, GammaFiles);
+        await WriteMemoryFilesAsync(deep,  DeepFiles);
+
+        return root;
+    }
+
+    private static async Task WriteMemoryFilesAsync(
+        IModifiableFolder folder, (string Name, string Content)[] files)
+    {
+        foreach (var (name, content) in files)
         {
-            var root = new MemoryFolder("root", "root");
-
-            await root.CreateFileAsync(FileAlpha, overwrite: false);
-            await root.CreateFileAsync(FileBeta,  overwrite: false);
-            await root.CreateFileAsync(FileZzz,   overwrite: false);
-
-            var gamma = (IModifiableFolder)await root.CreateFolderAsync(DirGamma, overwrite: false);
-            await gamma.CreateFileAsync(FileInner, overwrite: false);
-
-            var deep = (IModifiableFolder)await gamma.CreateFolderAsync(DirDeep, overwrite: false);
-            await deep.CreateFileAsync(FileBottom, overwrite: false);
-
-            await root.CreateFolderAsync(DirEmpty, overwrite: false);
-
-            return root;
+            var file   = (IFile)await folder.CreateFileAsync(name, overwrite: false);
+            var stream = await file.OpenStreamAsync(FileAccess.ReadWrite);
+            await using (stream)
+            {
+                await stream.WriteAsync(Encoding.UTF8.GetBytes(content));
+            }
         }
-        else
+    }
+
+    private void StopProjFs()
+    {
+        if (_vi is not null)
         {
-            _tempDir = Path.Combine(Path.GetTempPath(), "OwlMountContractTests_" + Guid.NewGuid().ToString("N"));
-            Directory.CreateDirectory(_tempDir);
+            try
+            {
+                _vi.StopVirtualizing();
+            }
+            catch (Exception ex)
+            {
+                // StopVirtualizing should not normally throw, but we log and continue
+                // so the rest of cleanup still runs.
+                Console.Error.WriteLine(
+                    $"[FolderContractTests] StopVirtualizing threw unexpectedly: {ex.Message}");
+            }
+            _vi = null;
+        }
 
-            File.WriteAllText(Path.Combine(_tempDir, FileAlpha), "alpha content");
-            File.WriteAllText(Path.Combine(_tempDir, FileBeta),  "beta content");
-            File.WriteAllText(Path.Combine(_tempDir, FileZzz),   "zzz content");
+        TryDelete(_projFsRoot);
+        TryDelete(_localRoot);
+        TryDelete(_blockCacheDir);
+    }
 
-            string gammaDir = Path.Combine(_tempDir, DirGamma);
-            Directory.CreateDirectory(gammaDir);
-            File.WriteAllText(Path.Combine(gammaDir, FileInner), "inner content");
+    private static string TempDir(string tag) =>
+        Path.Combine(
+            Path.GetTempPath(),
+            $"OwlMountContract_{tag}_{Guid.NewGuid():N}");
 
-            string deepDir = Path.Combine(gammaDir, DirDeep);
-            Directory.CreateDirectory(deepDir);
-            File.WriteAllText(Path.Combine(deepDir, FileBottom), "bottom content");
-
-            Directory.CreateDirectory(Path.Combine(_tempDir, DirEmpty));
-
-            return new SystemFolder(_tempDir);
+    private static void TryDelete(string? path)
+    {
+        if (path is null || !Directory.Exists(path)) return;
+        try { Directory.Delete(path, recursive: true); }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine(
+                $"[FolderContractTests] Could not delete temp directory '{path}': {ex.Message}");
         }
     }
 
@@ -120,200 +243,265 @@ public sealed class FolderContractTests : IAsyncLifetime
 
     // ── Tests ─────────────────────────────────────────────────────────────────
 
-    [Theory]
-    [InlineData(FolderBackend.Memory)]
-    [InlineData(FolderBackend.LocalFilesystem)]
-    public async Task GetItemsAsync_Root_ReturnsSameNamesAfterProviderSort(FolderBackend backend)
+    [Fact]
+    public void BothSides_ProduceIdenticalRootEnumeration()
     {
-        IFolder root = await BuildTreeAsync(backend);
-        var names = ProviderEnumerate(root).Select(e => e.Name).ToArray();
-        Assert.Equal(ExpectedRootNamesSorted, names);
-    }
-
-    [Theory]
-    [InlineData(FolderBackend.Memory)]
-    [InlineData(FolderBackend.LocalFilesystem)]
-    public async Task GetItemsAsync_Root_ReturnsCorrectCount(FolderBackend backend)
-    {
-        IFolder root = await BuildTreeAsync(backend);
-        Assert.Equal(5, ProviderEnumerate(root).Count);
-    }
-
-    [Theory]
-    [InlineData(FolderBackend.Memory)]
-    [InlineData(FolderBackend.LocalFilesystem)]
-    public async Task GetItemsAsync_FilesAreClassifiedAsIFile(FolderBackend backend)
-    {
-        IFolder root  = await BuildTreeAsync(backend);
-        var     items = ProviderEnumerate(root);
-        var     files = items.Where(e => !e.IsDirectory).Select(e => e.Name).ToArray();
-        Assert.Contains(FileAlpha, files);
-        Assert.Contains(FileBeta,  files);
-        Assert.Contains(FileZzz,   files);
-    }
-
-    [Theory]
-    [InlineData(FolderBackend.Memory)]
-    [InlineData(FolderBackend.LocalFilesystem)]
-    public async Task GetItemsAsync_FoldersAreClassifiedAsIFolder(FolderBackend backend)
-    {
-        IFolder root    = await BuildTreeAsync(backend);
-        var     items   = ProviderEnumerate(root);
-        var     folders = items.Where(e => e.IsDirectory).Select(e => e.Name).ToArray();
-        Assert.Contains(DirGamma, folders);
-        Assert.Contains(DirEmpty, folders);
-    }
-
-    [Theory]
-    [InlineData(FolderBackend.Memory)]
-    [InlineData(FolderBackend.LocalFilesystem)]
-    public async Task GetItemsAsync_EmptyFolder_ReturnsNoItems(FolderBackend backend)
-    {
-        IFolder root  = await BuildTreeAsync(backend);
-        IFolder empty = (IFolder)await root.GetFirstByNameAsync(DirEmpty);
-        Assert.Empty(ProviderEnumerate(empty));
-    }
-
-    [Theory]
-    [InlineData(FolderBackend.Memory)]
-    [InlineData(FolderBackend.LocalFilesystem)]
-    public async Task GetItemsAsync_Subfolder_ReturnsSortedItems(FolderBackend backend)
-    {
-        IFolder root  = await BuildTreeAsync(backend);
-        IFolder gamma = (IFolder)await root.GetFirstByNameAsync(DirGamma);
-
-        var names = ProviderEnumerate(gamma).Select(e => e.Name).ToArray();
-        Assert.Equal([DirDeep, FileInner], names);
-    }
-
-    [Theory]
-    [InlineData(FolderBackend.Memory)]
-    [InlineData(FolderBackend.LocalFilesystem)]
-    public async Task GetItemsAsync_DeeplyNestedFolder_ReturnsCorrectItem(FolderBackend backend)
-    {
-        IFolder root  = await BuildTreeAsync(backend);
-        IFolder gamma = (IFolder)await root.GetFirstByNameAsync(DirGamma);
-        IFolder deep  = (IFolder)await gamma.GetFirstByNameAsync(DirDeep);
-
-        var names = ProviderEnumerate(deep).Select(e => e.Name).ToArray();
-        Assert.Equal([FileBottom], names);
-    }
-
-    [Theory]
-    [InlineData(FolderBackend.Memory)]
-    [InlineData(FolderBackend.LocalFilesystem)]
-    public async Task GetFirstByNameAsync_ExistingFile_ReturnsIFile(FolderBackend backend)
-    {
-        IFolder root = await BuildTreeAsync(backend);
-        IStorableChild item = await root.GetFirstByNameAsync(FileAlpha);
-        Assert.IsAssignableFrom<IFile>(item);
-        Assert.Equal(FileAlpha, item.Name);
-    }
-
-    [Theory]
-    [InlineData(FolderBackend.Memory)]
-    [InlineData(FolderBackend.LocalFilesystem)]
-    public async Task GetFirstByNameAsync_ExistingFolder_ReturnsIFolder(FolderBackend backend)
-    {
-        IFolder root = await BuildTreeAsync(backend);
-        IStorableChild item = await root.GetFirstByNameAsync(DirGamma);
-        Assert.IsAssignableFrom<IFolder>(item);
-        Assert.Equal(DirGamma, item.Name);
-    }
-
-    [Theory]
-    [InlineData(FolderBackend.Memory)]
-    [InlineData(FolderBackend.LocalFilesystem)]
-    public async Task GetFirstByNameAsync_NonExistentItem_ThrowsFileNotFoundException(FolderBackend backend)
-    {
-        IFolder root = await BuildTreeAsync(backend);
-        await Assert.ThrowsAsync<FileNotFoundException>(
-            () => root.GetFirstByNameAsync("does-not-exist.txt"));
-    }
-
-    [Theory]
-    [InlineData(FolderBackend.Memory)]
-    [InlineData(FolderBackend.LocalFilesystem)]
-    public async Task GetFirstByNameAsync_FileInSubfolder_IsAccessible(FolderBackend backend)
-    {
-        IFolder root  = await BuildTreeAsync(backend);
-        IFolder gamma = (IFolder)await root.GetFirstByNameAsync(DirGamma);
-        IStorableChild inner = await gamma.GetFirstByNameAsync(FileInner);
-        Assert.Equal(FileInner, inner.Name);
-        Assert.IsAssignableFrom<IFile>(inner);
-    }
-
-    [Theory]
-    [InlineData(FolderBackend.Memory)]
-    [InlineData(FolderBackend.LocalFilesystem)]
-    public async Task GetFirstByNameAsync_DeeplyNestedFile_IsAccessibleThroughHierarchy(FolderBackend backend)
-    {
-        IFolder root   = await BuildTreeAsync(backend);
-        IFolder gamma  = (IFolder)await root.GetFirstByNameAsync(DirGamma);
-        IFolder deep   = (IFolder)await gamma.GetFirstByNameAsync(DirDeep);
-        IStorableChild bottom = await deep.GetFirstByNameAsync(FileBottom);
-        Assert.Equal(FileBottom, bottom.Name);
-        Assert.IsAssignableFrom<IFile>(bottom);
+        if (ShouldSkip()) return;
+        Assert.Equal(ProviderEnumerate(_local!), ProviderEnumerate(_projected!));
     }
 
     [Fact]
-    public async Task ProviderEnumerate_BothBackends_ProduceIdenticalOutput()
+    public void BothSides_RootEnumeration_MatchesExpectedSortedNames()
     {
-        // Build BOTH trees and compare output — the definitive 1:1 assertion.
-        var mem = ProviderEnumerate(await BuildTreeAsync(FolderBackend.Memory));
+        if (ShouldSkip()) return;
 
-        _tempDir = null; // reset so the next build creates a fresh temp dir
-        var local = ProviderEnumerate(await BuildTreeAsync(FolderBackend.LocalFilesystem));
+        string[] localNames     = ProviderEnumerate(_local!).Select(e => e.Name).ToArray();
+        string[] projectedNames = ProviderEnumerate(_projected!).Select(e => e.Name).ToArray();
 
-        Assert.Equal(mem, local);
+        Assert.Equal(ExpectedRootSorted, localNames);
+        Assert.Equal(ExpectedRootSorted, projectedNames);
     }
 
-    [Theory]
-    [InlineData(FolderBackend.Memory)]
-    [InlineData(FolderBackend.LocalFilesystem)]
-    public async Task ProviderEnumerate_SortOrder_IsCaseInsensitiveAscending(FolderBackend backend)
+    [Fact]
+    public void BothSides_RootEnumeration_ReturnsCorrectCount()
     {
-        IFolder root  = await BuildTreeAsync(backend);
-        var     names = ProviderEnumerate(root).Select(e => e.Name).ToList();
-        var     sorted = names.OrderBy(n => n, StringComparer.OrdinalIgnoreCase).ToList();
-        Assert.Equal(sorted, names);
+        if (ShouldSkip()) return;
+        Assert.Equal(5, ProviderEnumerate(_local!).Count);
+        Assert.Equal(5, ProviderEnumerate(_projected!).Count);
     }
 
-    [Theory]
-    [InlineData(FolderBackend.Memory)]
-    [InlineData(FolderBackend.LocalFilesystem)]
-    public async Task ProviderEnumerate_FileAndFolderMixed_AllPresent(FolderBackend backend)
+    [Fact]
+    public void BothSides_FilesAreClassifiedAsIFile()
     {
-        IFolder root  = await BuildTreeAsync(backend);
-        var     items = ProviderEnumerate(root);
-        int fileCount   = items.Count(e => !e.IsDirectory);
-        int folderCount = items.Count(e =>  e.IsDirectory);
-        Assert.Equal(3, fileCount);   // alpha.txt, Beta.txt, zZz.txt
-        Assert.Equal(2, folderCount); // gamma, empty
+        if (ShouldSkip()) return;
+
+        foreach (var folder in new[] { _local!, _projected! })
+        {
+            string[] files = ProviderEnumerate(folder)
+                .Where(e => !e.IsDirectory).Select(e => e.Name).ToArray();
+            Assert.Contains(FileAlpha, files);
+            Assert.Contains(FileBeta,  files);
+            Assert.Contains(FileZzz,   files);
+        }
     }
 
-    [Theory]
-    [InlineData(FolderBackend.Memory)]
-    [InlineData(FolderBackend.LocalFilesystem)]
-    public async Task ProviderEnumerate_SubfolderContents_MatchExpectedStructure(FolderBackend backend)
+    [Fact]
+    public void BothSides_FoldersAreClassifiedAsIFolder()
     {
-        IFolder root  = await BuildTreeAsync(backend);
-        IFolder gamma = (IFolder)await root.GetFirstByNameAsync(DirGamma);
-        var     items = ProviderEnumerate(gamma);
+        if (ShouldSkip()) return;
 
-        Assert.Equal(2, items.Count);
-        Assert.Contains(items, e => e.Name == DirDeep  && e.IsDirectory);
-        Assert.Contains(items, e => e.Name == FileInner && !e.IsDirectory);
+        foreach (var folder in new[] { _local!, _projected! })
+        {
+            string[] folders = ProviderEnumerate(folder)
+                .Where(e => e.IsDirectory).Select(e => e.Name).ToArray();
+            Assert.Contains(DirGamma, folders);
+            Assert.Contains(DirEmpty, folders);
+        }
     }
 
-    [Theory]
-    [InlineData(FolderBackend.Memory)]
-    [InlineData(FolderBackend.LocalFilesystem)]
-    public async Task GetItemsAsync_ReEnumerate_ReturnsSameResultsOnSecondCall(FolderBackend backend)
+    [Fact]
+    public async Task BothSides_EmptySubfolder_ReturnsNoItems()
     {
-        IFolder root   = await BuildTreeAsync(backend);
-        var     first  = ProviderEnumerate(root);
-        var     second = ProviderEnumerate(root);
-        Assert.Equal(first, second);
+        if (ShouldSkip()) return;
+
+        foreach (var root in new[] { _local!, _projected! })
+        {
+            var empty = (IFolder)await root.GetFirstByNameAsync(DirEmpty);
+            Assert.Empty(ProviderEnumerate(empty));
+        }
+    }
+
+    [Fact]
+    public async Task BothSides_Subfolder_ReturnsSortedItems()
+    {
+        if (ShouldSkip()) return;
+
+        foreach (var root in new[] { _local!, _projected! })
+        {
+            var gamma = (IFolder)await root.GetFirstByNameAsync(DirGamma);
+            var names = ProviderEnumerate(gamma).Select(e => e.Name).ToArray();
+            Assert.Equal([DirDeep, FileInner], names);
+        }
+    }
+
+    [Fact]
+    public async Task BothSides_SubfolderEnumeration_IsIdentical()
+    {
+        if (ShouldSkip()) return;
+
+        var localGamma     = (IFolder)await _local!.GetFirstByNameAsync(DirGamma);
+        var projectedGamma = (IFolder)await _projected!.GetFirstByNameAsync(DirGamma);
+
+        Assert.Equal(ProviderEnumerate(localGamma), ProviderEnumerate(projectedGamma));
+    }
+
+    [Fact]
+    public async Task BothSides_DeeplyNestedFolder_ReturnsCorrectItem()
+    {
+        if (ShouldSkip()) return;
+
+        foreach (var root in new[] { _local!, _projected! })
+        {
+            var gamma = (IFolder)await root.GetFirstByNameAsync(DirGamma);
+            var deep  = (IFolder)await gamma.GetFirstByNameAsync(DirDeep);
+            var names = ProviderEnumerate(deep).Select(e => e.Name).ToArray();
+            Assert.Equal([FileBottom], names);
+        }
+    }
+
+    [Fact]
+    public async Task BothSides_DeepFolderEnumeration_IsIdentical()
+    {
+        if (ShouldSkip()) return;
+
+        var localDeep = (IFolder)await
+            ((IFolder)await _local!.GetFirstByNameAsync(DirGamma)).GetFirstByNameAsync(DirDeep);
+        var projectedDeep = (IFolder)await
+            ((IFolder)await _projected!.GetFirstByNameAsync(DirGamma)).GetFirstByNameAsync(DirDeep);
+
+        Assert.Equal(ProviderEnumerate(localDeep), ProviderEnumerate(projectedDeep));
+    }
+
+    [Fact]
+    public async Task BothSides_GetFirstByNameAsync_ExistingFile_ReturnsIFile()
+    {
+        if (ShouldSkip()) return;
+
+        foreach (var root in new[] { _local!, _projected! })
+        {
+            var item = await root.GetFirstByNameAsync(FileAlpha);
+            Assert.IsAssignableFrom<IFile>(item);
+            Assert.Equal(FileAlpha, item.Name);
+        }
+    }
+
+    [Fact]
+    public async Task BothSides_GetFirstByNameAsync_ExistingFolder_ReturnsIFolder()
+    {
+        if (ShouldSkip()) return;
+
+        foreach (var root in new[] { _local!, _projected! })
+        {
+            var item = await root.GetFirstByNameAsync(DirGamma);
+            Assert.IsAssignableFrom<IFolder>(item);
+            Assert.Equal(DirGamma, item.Name);
+        }
+    }
+
+    [Fact]
+    public async Task BothSides_GetFirstByNameAsync_NonExistentItem_ThrowsFileNotFoundException()
+    {
+        if (ShouldSkip()) return;
+
+        foreach (var root in new[] { _local!, _projected! })
+        {
+            await Assert.ThrowsAsync<FileNotFoundException>(
+                () => root.GetFirstByNameAsync("does-not-exist.txt"));
+        }
+    }
+
+    [Fact]
+    public async Task BothSides_FileInSubfolder_IsAccessible()
+    {
+        if (ShouldSkip()) return;
+
+        foreach (var root in new[] { _local!, _projected! })
+        {
+            var gamma = (IFolder)await root.GetFirstByNameAsync(DirGamma);
+            var inner = await gamma.GetFirstByNameAsync(FileInner);
+            Assert.Equal(FileInner, inner.Name);
+            Assert.IsAssignableFrom<IFile>(inner);
+        }
+    }
+
+    [Fact]
+    public async Task BothSides_DeeplyNestedFile_IsAccessibleThroughHierarchy()
+    {
+        if (ShouldSkip()) return;
+
+        foreach (var root in new[] { _local!, _projected! })
+        {
+            var gamma  = (IFolder)await root.GetFirstByNameAsync(DirGamma);
+            var deep   = (IFolder)await gamma.GetFirstByNameAsync(DirDeep);
+            var bottom = await deep.GetFirstByNameAsync(FileBottom);
+            Assert.Equal(FileBottom, bottom.Name);
+            Assert.IsAssignableFrom<IFile>(bottom);
+        }
+    }
+
+    [Fact]
+    public async Task BothSides_ReadFileContent_MatchesExpected()
+    {
+        if (ShouldSkip()) return;
+
+        foreach (var root in new[] { _local!, _projected! })
+        {
+            var file = (IFile)await root.GetFirstByNameAsync(FileAlpha);
+            await using var stream = await file.OpenStreamAsync(FileAccess.Read);
+            using var reader = new StreamReader(stream, Encoding.UTF8);
+            string content = await reader.ReadToEndAsync();
+            Assert.Equal("alpha content", content);
+        }
+    }
+
+    [Fact]
+    public async Task BothSides_FileContent_IsIdentical()
+    {
+        if (ShouldSkip()) return;
+
+        static async Task<string> ReadContent(IFolder root, string name)
+        {
+            var file = (IFile)await root.GetFirstByNameAsync(name);
+            await using var stream = await file.OpenStreamAsync(FileAccess.Read);
+            using var reader = new StreamReader(stream, Encoding.UTF8);
+            return await reader.ReadToEndAsync();
+        }
+
+        foreach (var (name, expected) in RootFiles)
+        {
+            string localContent     = await ReadContent(_local!,     name);
+            string projectedContent = await ReadContent(_projected!, name);
+            Assert.Equal(expected,     localContent);
+            Assert.Equal(localContent, projectedContent);
+        }
+    }
+
+    [Fact]
+    public void BothSides_SortOrder_IsCaseInsensitiveAscending()
+    {
+        if (ShouldSkip()) return;
+
+        foreach (var root in new[] { _local!, _projected! })
+        {
+            var names  = ProviderEnumerate(root).Select(e => e.Name).ToList();
+            var sorted = names.OrderBy(n => n, StringComparer.OrdinalIgnoreCase).ToList();
+            Assert.Equal(sorted, names);
+        }
+    }
+
+    [Fact]
+    public void BothSides_FileAndFolderMixed_CountsMatch()
+    {
+        if (ShouldSkip()) return;
+
+        foreach (var root in new[] { _local!, _projected! })
+        {
+            var items = ProviderEnumerate(root);
+            Assert.Equal(3, items.Count(e => !e.IsDirectory)); // alpha, Beta, zZz
+            Assert.Equal(2, items.Count(e =>  e.IsDirectory)); // gamma, empty
+        }
+    }
+
+    [Fact]
+    public void BothSides_ReEnumerate_ReturnsSameResults()
+    {
+        if (ShouldSkip()) return;
+
+        foreach (var root in new[] { _local!, _projected! })
+        {
+            var first  = ProviderEnumerate(root);
+            var second = ProviderEnumerate(root);
+            Assert.Equal(first, second);
+        }
     }
 }

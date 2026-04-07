@@ -32,7 +32,7 @@ public sealed class OwlMountProvider : IRequiredCallbacks
     /// <see cref="VirtualizationInstance.StartVirtualizing"/> is called so callbacks
     /// can write placeholder info and file data back to ProjFS.
     /// </summary>
-    internal VirtualizationInstance? Instance { get; set; }
+    public VirtualizationInstance? Instance { get; set; }
 
     /// <summary>Throws if <see cref="Instance"/> has not been set yet.</summary>
     private VirtualizationInstance RequireInstance() =>
