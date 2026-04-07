@@ -58,14 +58,23 @@ public sealed class OwlMountProvider : IRequiredCallbacks
     // ── IRequiredCallbacks ────────────────────────────────────────────────────
 
     /// <summary>
-    /// Called when the OS begins enumerating a directory. We pre-fetch and sort the
-    /// listing so subsequent <see cref="GetDirectoryEnumerationCallback"/> calls are fast.
+    /// Called when the OS begins enumerating a directory. Returns cached listings when
+    /// available; otherwise fetches, sorts, and caches the result for reuse.
     /// </summary>
     public HResult StartDirectoryEnumerationCallback(
         int commandId, Guid enumerationId, string relativePath,
         uint triggeringProcessId, string triggeringProcessImageFileName)
     {
         string norm = NormalizeProjFsPath(relativePath);
+
+        // Return the cached listing if it is still valid to avoid redundant provider calls.
+        IReadOnlyList<DirectoryEntry>? cached = _dirCache.TryGet(norm);
+        if (cached is not null)
+        {
+            _enumerations[enumerationId] = new EnumerationState(cached);
+            return HResult.Ok;
+        }
+
         IFolder? folder = string.IsNullOrEmpty(norm) ? _root : ResolveFolder(norm);
         if (folder is null) return HResult.FileNotFound;
 
@@ -334,13 +343,6 @@ public sealed class OwlMountProvider : IRequiredCallbacks
         catch (FileNotFoundException)
         {
             return null;
-        }
-        catch
-        {
-            // Fallback: iterate manually
-            return folder.GetItemsAsync()
-                .ToBlockingEnumerable()
-                .FirstOrDefault(x => string.Equals(x.Name, name, StringComparison.OrdinalIgnoreCase));
         }
     }
 
