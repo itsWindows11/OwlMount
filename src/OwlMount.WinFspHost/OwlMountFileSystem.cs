@@ -28,6 +28,7 @@ public sealed class OwlMountFileSystem : FileSystemBase
     private readonly BlockCache _blockCache;
     private readonly RangeReaderRegistry _rangeReaders;
     private readonly SizeProviderRegistry _sizeProviders;
+    private readonly string _volumeLabel;
 
     // Windows file attribute constants (subset used here)
     private const uint AttrReadOnly  = 0x00000001u; // FILE_ATTRIBUTE_READONLY
@@ -37,14 +38,16 @@ public sealed class OwlMountFileSystem : FileSystemBase
         IFolder root,
         BlockCache blockCache,
         RangeReaderRegistry rangeReaders,
-        SizeProviderRegistry? sizeProviders = null)
+        SizeProviderRegistry? sizeProviders = null,
+        string? volumeLabel = null)
     {
-        _root         = root;
-        _index        = new PathIndex();
-        _dirCache     = new DirectoryCache();
-        _blockCache   = blockCache;
-        _rangeReaders = rangeReaders;
+        _root          = root;
+        _index         = new PathIndex();
+        _dirCache      = new DirectoryCache();
+        _blockCache    = blockCache;
+        _rangeReaders  = rangeReaders;
         _sizeProviders = sizeProviders ?? new SizeProviderRegistry();
+        _volumeLabel   = string.IsNullOrWhiteSpace(volumeLabel) ? "OwlMount" : volumeLabel;
     }
 
     // ── Volume info ───────────────────────────────────────────────────────────
@@ -54,6 +57,7 @@ public sealed class OwlMountFileSystem : FileSystemBase
         volumeInfo = default;
         volumeInfo.TotalSize = 1UL * 1024 * 1024 * 1024; // nominal 1 GiB
         volumeInfo.FreeSize  = 0;
+        volumeInfo.SetVolumeLabel(_volumeLabel);
         return STATUS_SUCCESS;
     }
 
@@ -345,8 +349,8 @@ public sealed class OwlMountFileSystem : FileSystemBase
                 item.Name,
                 isDir,
                 size,
-                created  == DateTimeOffset.MinValue ? DateTimeOffset.UnixEpoch : created,
-                modified == DateTimeOffset.MinValue ? DateTimeOffset.UnixEpoch : modified));
+                created  ?? DateTimeOffset.UnixEpoch,
+                modified ?? DateTimeOffset.UnixEpoch));
         }
 
         _dirCache.Set(ctx.NormalizedPath, result);
@@ -374,8 +378,8 @@ public sealed class OwlMountFileSystem : FileSystemBase
         if (child is null) return null;
 
         bool isFile = child is IFile;
-        DateTimeOffset? created  = child is ICreatedAt ca  ? ca.CreatedAt  : null;
-        DateTimeOffset? modified = child is ILastModifiedAt lm ? lm.LastModifiedAt : null;
+        DateTimeOffset? created  = GetCreatedAt(child);
+        DateTimeOffset? modified = GetLastModifiedAt(child);
 
         var entry = new PathIndexEntry
         {
@@ -480,6 +484,99 @@ public sealed class OwlMountFileSystem : FileSystemBase
         fi.LastWriteTime  = ToFileTime(e.LastModified == DateTimeOffset.UnixEpoch ? null : (DateTimeOffset?)e.LastModified);
         fi.LastAccessTime = fi.LastWriteTime;
         fi.ChangeTime     = fi.LastWriteTime;
+    }
+
+    // ── Timestamp helpers ─────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Returns the creation timestamp for <paramref name="item"/> as a
+    /// <see cref="DateTimeOffset"/>, preferring <see cref="ICreatedAtOffset"/> (preserves
+    /// timezone offset) over <see cref="ICreatedAt"/> (UTC <see cref="DateTime"/>).
+    /// Returns <c>null</c> when neither interface is implemented or the value is unavailable.
+    /// </summary>
+    private static DateTimeOffset? GetCreatedAt(IStorable item)
+    {
+        if (item is ICreatedAtOffset cao)
+        {
+            DateTimeOffset? v = cao.CreatedAtOffset.GetValueAsync().GetAwaiter().GetResult();
+            if (v is not null && v != DateTimeOffset.MinValue)
+                return v;
+        }
+
+        if (item is ICreatedAt ca)
+        {
+            DateTime? v = ca.CreatedAt.GetValueAsync().GetAwaiter().GetResult();
+            if (v is not null && v != DateTime.MinValue)
+                return new DateTimeOffset(v.Value, TimeSpan.Zero);
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Returns the last-modified timestamp for <paramref name="item"/>, with the same
+    /// <see cref="ILastModifiedAtOffset"/> → <see cref="ILastModifiedAt"/> fallback.
+    /// </summary>
+    private static DateTimeOffset? GetLastModifiedAt(IStorable item)
+    {
+        if (item is ILastModifiedAtOffset lmo)
+        {
+            DateTimeOffset? v = lmo.LastModifiedAtOffset.GetValueAsync().GetAwaiter().GetResult();
+            if (v is not null && v != DateTimeOffset.MinValue)
+                return v;
+        }
+
+        if (item is ILastModifiedAt lm)
+        {
+            DateTime? v = lm.LastModifiedAt.GetValueAsync().GetAwaiter().GetResult();
+            if (v is not null && v != DateTime.MinValue)
+                return new DateTimeOffset(v.Value, TimeSpan.Zero);
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Matches <paramref name="name"/> against a WinFsp wildcard <paramref name="pattern"/>
+    /// using <c>?</c> (any single char) and <c>*</c> (any sequence of chars) semantics.
+    /// Comparison is case-insensitive.
+    /// </summary>
+    private static bool WildcardMatch(string pattern, string name)
+    {
+        ReadOnlySpan<char> p = pattern.AsSpan();
+        ReadOnlySpan<char> n = name.AsSpan();
+        return WildcardMatchCore(p, n);
+    }
+
+    private static bool WildcardMatchCore(ReadOnlySpan<char> p, ReadOnlySpan<char> n)
+    {
+        while (true)
+        {
+            if (p.IsEmpty)
+                return n.IsEmpty;
+
+            if (p[0] == '*')
+            {
+                p = p[1..];
+                if (p.IsEmpty) return true;
+                // Try matching '*' against every suffix of n.
+                for (int i = 0; i <= n.Length; i++)
+                {
+                    if (WildcardMatchCore(p, n[i..]))
+                        return true;
+                }
+                return false;
+            }
+
+            if (n.IsEmpty)
+                return false;
+
+            if (p[0] != '?' && char.ToUpperInvariant(p[0]) != char.ToUpperInvariant(n[0]))
+                return false;
+
+            p = p[1..];
+            n = n[1..];
+        }
     }
 
     private static ulong ToFileTime(DateTimeOffset? dto)

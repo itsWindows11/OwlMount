@@ -39,11 +39,14 @@ dotnet build
 owlmount mount --provider systemio --path "C:\MyFolder" --letter X
 ```
 
+### Mount options
+
 | Flag | Default | Description |
 |---|---|---|
-| `--provider` | `systemio` | Provider name tag. Built-in values: `systemio`, `memory`. Also used to namespace the block cache. |
-| `--path` | current directory | Root path to expose. Required for `systemio`; ignored for `memory`. |
+| `--provider` | `systemio` | Provider name. See table below. |
 | `--letter` | `M` | Drive letter to mount (without the colon) |
+| `--label` | *(auto)* | Volume label shown in Explorer (e.g. `"My Files"`) |
+| `--path` | current directory | Root path for `systemio`; MFS path for `kubo-mfs` |
 
 Press **Ctrl+C**, or run `owlmount unmount --letter <X>` from another terminal, to unmount cleanly.
 
@@ -55,13 +58,27 @@ Press **Ctrl+C**, or run `owlmount unmount --letter <X>` from another terminal, 
 | `unmount --letter <X>` | Unmount a running mount by drive letter |
 | `list` | List all active mounts and their PIDs |
 
-### Example — mount `C:\Users\Alice\Documents` as `D:`
+### Supported providers
+
+| `--provider` | Extra flags | Description |
+|---|---|---|
+| `systemio` | `--path <dir>` | Local filesystem folder |
+| `memory` | *(none)* | Empty in-memory filesystem (lives until process exits) |
+| `kubo-mfs` | `--path <mfs-path>` `[--api-url]` | Kubo MFS (Mutable File System) |
+| `kubo-ipfs` | `--cid <CID>` `[--api-url]` | Immutable IPFS directory by CID |
+| `kubo-ipns` | `--ipns <address>` `[--api-url]` | IPNS-addressed directory |
+| `s3` | `--bucket` `[--prefix]` `[--access-key]` `[--secret-key]` `[--region]` `[--endpoint]` | Amazon S3 bucket/prefix |
+| `nfs` | `--host <ip>` `--export </path>` `[--nfs-path <path>]` | NFS v3 share |
+
+> **OneDrive** is supported as a code-level provider (`OneDriveFolder` / `OneDriveFile` from `OwlCore.Storage.OneDrive`) but requires a pre-authenticated `GraphServiceClient` from MSAL — see the *Adding a custom provider* section.
+
+### Example — mount a local folder as `D:` with a custom label
 
 ```bat
-owlmount mount --provider systemio --path "C:\Users\Alice\Documents" --letter D
+owlmount mount --provider systemio --path "C:\Users\Alice\Documents" --letter D --label "Alice Docs"
 ```
 
-Then open `D:\` in Explorer or any application.  Unmount from a second terminal:
+Then open `D:\` in Explorer. Unmount from a second terminal:
 
 ```bat
 owlmount unmount --letter D
@@ -70,10 +87,31 @@ owlmount unmount --letter D
 ### Example — empty in-memory filesystem as `R:`
 
 ```bat
-owlmount mount --provider memory --letter R
+owlmount mount --provider memory --letter R --label "RAM Drive"
 ```
 
-The drive starts completely empty.  Any files or folders you copy into `R:\` exist only in RAM and are gone when the process exits.
+The drive starts completely empty. Any files or folders you copy into `R:\` exist only in RAM and are gone when the process exits.
+
+### Example — Kubo MFS as `K:`
+
+```bat
+owlmount mount --provider kubo-mfs --path / --letter K --label "IPFS Files"
+```
+
+Requires a running Kubo daemon (default API: `http://127.0.0.1:5001`). Override with `--api-url`.
+
+### Example — S3 bucket as `S:`
+
+```bat
+owlmount mount --provider s3 --bucket my-bucket --prefix data/ --letter S ^
+  --access-key AKIA... --secret-key secret --region us-east-1
+```
+
+### Example — NFS share as `N:`
+
+```bat
+owlmount mount --provider nfs --host 192.168.1.10 --export /srv/share --letter N
+```
 
 ## Architecture
 
