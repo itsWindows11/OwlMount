@@ -1,7 +1,9 @@
 # OwlMount
 
-A Windows-only .NET 10 console application that mounts any
-[OwlCore.Storage](https://github.com/Arlodotexe/OwlCore.Storage) `IFolder` provider as a
+Mount any filesystem in the universe as a Windows drive using WinFsp!
+
+OwlMount is a Windows-only .NET 10 portable console application that mounts any
+[OwlCore.Storage](https://github.com/Arlodotexe/OwlCore.Storage) `IFolder` implementation as a
 Windows drive letter using [WinFsp](https://winfsp.dev).
 
 ## Features (MVP)
