@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
@@ -18,7 +18,7 @@
     <PackageReference Include="OwlCore.Kubo" Version="0.21.0" />
     <PackageReference Include="OwlCore.Storage.OneDrive" Version="0.3.0" />
     <PackageReference Include="OwlCore.Storage.AmazonS3" Version="0.1.1" />
-    <PackageReference Include="NfsSharp" Version="0.1.3" />
+    <PackageReference Include="OwlCore.Storage.NfsSharp" Version="0.1.0" />
   </ItemGroup>
 
 </Project>

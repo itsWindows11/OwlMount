@@ -9,10 +9,10 @@ using OwlCore.Kubo;
 using OwlCore.Storage;
 using OwlCore.Storage.AmazonS3;
 using OwlCore.Storage.Memory;
+using OwlCore.Storage.NfsSharp;
 using OwlMount.Core.Cache;
 using OwlMount.Core.Registry;
 using OwlMount.WinFspHost;
-using OwlMount.WinFspHost.Providers.Nfs;
 
 [SupportedOSPlatform("windows")]
 static partial class Program
@@ -327,7 +327,7 @@ static partial class Program
         string? letter = null;
         for (int i = 0; i < args.Length - 1; i++)
         {
-            if (args[i].ToLowerInvariant() == "--letter")
+            if (args[i].Equals("--letter", StringComparison.InvariantCultureIgnoreCase))
                 letter = args[++i];
         }
 

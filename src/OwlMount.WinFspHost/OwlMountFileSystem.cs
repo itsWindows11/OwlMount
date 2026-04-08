@@ -10,7 +10,6 @@ using OwlMount.Core.Abstractions;
 using OwlMount.Core.Cache;
 using OwlMount.Core.Index;
 using OwlMount.Core.Registry;
-using OwlMount.WinFspHost.Providers.Nfs;
 using FileInfo = Fsp.Interop.FileInfo;
 
 namespace OwlMount.WinFspHost;
@@ -1271,9 +1270,6 @@ public sealed class OwlMountFileSystem : FileSystemBase
 
     private static DateTimeOffset? GetCreatedAt(IStorable item)
     {
-        if (TryGetNfsTimestamps(item, out DateTimeOffset? created, out _, out _))
-            return created;
-
         if (item is ICreatedAtOffset cao)
         {
             DateTimeOffset? value = cao.CreatedAtOffset.GetValueAsync().GetAwaiter().GetResult();
@@ -1293,9 +1289,6 @@ public sealed class OwlMountFileSystem : FileSystemBase
 
     private static DateTimeOffset? GetLastAccessedAt(IStorable item)
     {
-        if (TryGetNfsTimestamps(item, out _, out DateTimeOffset? accessed, out _))
-            return accessed;
-
         if (item is ILastAccessedAtOffset lao)
         {
             DateTimeOffset? value = lao.LastAccessedAtOffset.GetValueAsync().GetAwaiter().GetResult();
@@ -1315,9 +1308,6 @@ public sealed class OwlMountFileSystem : FileSystemBase
 
     private static DateTimeOffset? GetLastModifiedAt(IStorable item)
     {
-        if (TryGetNfsTimestamps(item, out _, out _, out DateTimeOffset? modified))
-            return modified;
-
         if (item is ILastModifiedAtOffset lmo)
         {
             DateTimeOffset? value = lmo.LastModifiedAtOffset.GetValueAsync().GetAwaiter().GetResult();
@@ -1334,36 +1324,6 @@ public sealed class OwlMountFileSystem : FileSystemBase
 
         return null;
     }
-
-    private static bool TryGetNfsTimestamps(
-        IStorable item,
-        out DateTimeOffset? created,
-        out DateTimeOffset? accessed,
-        out DateTimeOffset? modified)
-    {
-        NfsSharp.Protocol.NfsFileAttributes? attributes = item switch
-        {
-            NfsFile file => file.Attributes,
-            NfsFolder folder => folder.Attributes,
-            _ => null,
-        };
-
-        if (attributes is null)
-        {
-            created = null;
-            accessed = null;
-            modified = null;
-            return false;
-        }
-
-        created = NormalizeTimestamp(attributes.ChangeTime);
-        accessed = NormalizeTimestamp(attributes.AccessTime);
-        modified = NormalizeTimestamp(attributes.ModifyTime);
-        return created is not null || accessed is not null || modified is not null;
-    }
-
-    private static DateTimeOffset? NormalizeTimestamp(DateTimeOffset timestamp) =>
-        timestamp == DateTimeOffset.MinValue ? null : timestamp;
 
     private static ulong ToFileTime(DateTimeOffset? dto)
     {
