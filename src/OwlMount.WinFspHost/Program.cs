@@ -6,6 +6,7 @@ using Amazon.S3;
 using Amazon.S3.Model;
 using Ipfs.Http;
 using NfsSharp;
+using NfsSharp.Protocol;
 using OwlCore.Kubo;
 using OwlCore.Storage;
 using OwlCore.Storage.AmazonS3;
@@ -109,6 +110,9 @@ static partial class Program
         IFolder      root;
         string       displayRoot;
         IDisposable? extraDisposable = null; // tracks any provider-owned resource (e.g. S3 HttpClientFactory)
+        // Provider-specific fast-path size fetcher registered after the switch.
+        ISizeProvider? providerSizeProvider = null;
+        Func<IFile, bool>? providerSizePredicate = null;
 
         switch (provider.ToLowerInvariant())
         {
@@ -241,6 +245,8 @@ static partial class Program
 
                 root = new S3Folder(s3Client, s3Bucket, s3Prefix ?? string.Empty);
                 displayRoot = $"s3://{s3Bucket}/{s3Prefix ?? string.Empty}";
+                providerSizePredicate = f => f is S3File;
+                providerSizeProvider  = new S3HeadSizeProvider();
                 break;
             }
 
@@ -259,6 +265,8 @@ static partial class Program
                 root        = await NfsFolder.GetFromNfsPathAsync(nfsClient, nfsPath ?? "/");
                 displayRoot = $"nfs://{nfsHost}{nfsExport}{nfsPath}";
                 (totalSize, freeSize) = await TryGetNfsVolumeSpaceAsync(nfsClient);
+                providerSizePredicate = f => f is NfsFile;
+                providerSizeProvider  = new NfsStatSizeProvider(nfsClient);
                 break;
             }
 
@@ -308,9 +316,11 @@ static partial class Program
 
         // Register provider-specific optimisations.
         // S3: use a HEAD request (GetObjectMetadata) to get file size rather than
-        // opening a full GET stream, which makes Open() ~10x faster for S3 files.
-        if (root is S3Folder)
-            sizeProviders.Register(f => f is S3File, new S3HeadSizeProvider());
+        //     opening a full GET stream, which avoids a full download per file.
+        // NFS: use GetAttr (single stat RPC) instead of opening and seeking a stream.
+        // Both providers run their size requests in parallel during directory listing.
+        if (providerSizeProvider is not null && providerSizePredicate is not null)
+            sizeProviders.Register(providerSizePredicate, providerSizeProvider);
 
         // CTS shared by CancelKeyPress and backend.Stopped so either path exits cleanly.
         var cts = new CancellationTokenSource();
@@ -692,7 +702,7 @@ static partial class Program
         return ok;
     }
 
-    // ── S3 TLS helper ─────────────────────────────────────────────────────────
+    // ── Provider-specific size fastpath helpers ───────────────────────────────
 
     /// <summary>
     /// <see cref="ISizeProvider"/> for S3 files that uses a HEAD request
@@ -707,6 +717,22 @@ static partial class Program
             if (file is not S3File s3File) return null;
             GetObjectMetadataResponse meta = await s3File.GetMetadataAsync(ct);
             return meta.ContentLength;
+        }
+    }
+
+    /// <summary>
+    /// <see cref="ISizeProvider"/> for NFS files that retrieves file size via a single
+    /// <c>GETATTR</c> RPC (<see cref="INfsClient.GetAttrAsync"/>) rather than opening
+    /// a full stream.  The <see cref="NfsFileAttributes.Size"/> field returned by the
+    /// server already contains the authoritative file size.
+    /// </summary>
+    private sealed class NfsStatSizeProvider(INfsClient nfsClient) : ISizeProvider
+    {
+        public async Task<long?> GetSizeAsync(IFile file, CancellationToken ct = default)
+        {
+            if (file is not NfsFile nfsFile) return null;
+            NfsFileAttributes attrs = await nfsClient.GetAttrAsync(nfsFile.Path, ct);
+            return (long)attrs.Size;
         }
     }
 

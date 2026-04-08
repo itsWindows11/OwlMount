@@ -108,40 +108,91 @@ public sealed class OwlMountProvider : IRequiredCallbacks
         List<DirectoryEntry> entries;
         try
         {
-            entries = folder.GetItemsAsync()
+            List<IStorableChild> items = folder.GetItemsAsync()
                 .ToBlockingEnumerable()
                 .OrderBy(x => x.Name, StringComparer.OrdinalIgnoreCase)
-                .Select(item =>
-                {
-                    bool isDir = item is IFolder;
-                    DateTimeOffset? created  = GetCreatedAt(item);
-                    DateTimeOffset? modified = GetLastModifiedAt(item);
-
-                    string childPath = string.IsNullOrEmpty(norm)
-                        ? item.Name
-                        : norm + "/" + item.Name;
-
-                    _index.AddOrUpdate(childPath, new PathIndexEntry
-                    {
-                        Id             = item.Id,
-                        Name           = item.Name,
-                        IsFile         = !isDir,
-                        CreatedAt      = created,
-                        LastModifiedAt = modified,
-                    });
-
-                    if (item is IFolder childFolder)
-                        _folderObjects.TryAdd(childPath, childFolder);
-
-                    return new DirectoryEntry(
-                        item.Name,
-                        isDir,
-                        0,
-                        created  ?? DateTimeOffset.UnixEpoch,
-                        modified ?? DateTimeOffset.UnixEpoch,
-                        modified ?? DateTimeOffset.UnixEpoch);
-                })
                 .ToList();
+
+            // Pre-compute child paths and cache sub-folder objects.
+            var childPaths = new string[items.Count];
+            for (int i = 0; i < items.Count; i++)
+            {
+                childPaths[i] = string.IsNullOrEmpty(norm) ? items[i].Name : norm + "/" + items[i].Name;
+                if (items[i] is IFolder childFolder)
+                    _folderObjects.TryAdd(childPaths[i], childFolder);
+            }
+
+            // Fetch file sizes in parallel using the provider's fastpath
+            // (e.g. S3 HEAD, NFS stat) rather than opening a full stream per file.
+            const int MaxSizeConcurrency = 8;
+            using var semaphore = new SemaphoreSlim(MaxSizeConcurrency, MaxSizeConcurrency);
+
+            var sizeTasks = new Task<long?>[items.Count];
+            for (int i = 0; i < items.Count; i++)
+            {
+                if (items[i] is not IFile file)
+                {
+                    sizeTasks[i] = Task.FromResult<long?>(null);
+                    continue;
+                }
+
+                if (_index.TryGet(childPaths[i]) is { Size: long cached })
+                {
+                    sizeTasks[i] = Task.FromResult<long?>(cached);
+                    continue;
+                }
+
+                var capturedFile = file;
+                var capturedPath = childPaths[i];
+                sizeTasks[i] = Task.Run(async () =>
+                {
+                    await semaphore.WaitAsync(CancellationToken.None);
+                    try
+                    {
+                        return await _sizeProviders.GetProvider(capturedFile).GetSizeAsync(capturedFile);
+                    }
+                    catch
+                    {
+                        return (long?)null;
+                    }
+                    finally
+                    {
+                        semaphore.Release();
+                    }
+                });
+            }
+
+            // ProjFS callbacks run on dedicated threadpool threads with no
+            // SynchronizationContext, so blocking here does not risk a deadlock.
+            long?[] sizes = Task.WhenAll(sizeTasks).GetAwaiter().GetResult();
+
+            entries = new List<DirectoryEntry>(items.Count);
+            for (int i = 0; i < items.Count; i++)
+            {
+                IStorableChild item = items[i];
+                bool isDir = item is IFolder;
+                DateTimeOffset? created  = GetCreatedAt(item);
+                DateTimeOffset? modified = GetLastModifiedAt(item);
+                long? size = sizes[i];
+
+                _index.AddOrUpdate(childPaths[i], new PathIndexEntry
+                {
+                    Id             = item.Id,
+                    Name           = item.Name,
+                    IsFile         = !isDir,
+                    Size           = size,
+                    CreatedAt      = created,
+                    LastModifiedAt = modified,
+                });
+
+                entries.Add(new DirectoryEntry(
+                    item.Name,
+                    isDir,
+                    size ?? 0,
+                    created  ?? DateTimeOffset.UnixEpoch,
+                    modified ?? DateTimeOffset.UnixEpoch,
+                    modified ?? DateTimeOffset.UnixEpoch));
+            }
         }
         catch
         {

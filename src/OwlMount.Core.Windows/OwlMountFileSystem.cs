@@ -943,33 +943,80 @@ public sealed class OwlMountFileSystem : FileSystemBase
             .OrderBy(x => x.Name, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
-        List<DirectoryEntry> result = new(items.Count);
-        foreach (IStorableChild item in items)
+        // Pre-compute child paths and cache sub-folders.
+        var childPaths = new string[items.Count];
+        for (int i = 0; i < items.Count; i++)
         {
+            childPaths[i] = CombineNormalizedPath(ctx.NormalizedPath, items[i].Name);
+            if (items[i] is IFolder childFolder)
+            {
+                EnsureFolderWatcher(childFolder, childPaths[i]);
+                _folderObjects.TryAdd(childPaths[i], childFolder);
+            }
+        }
+
+        // Fetch file sizes using the provider's fastpath (e.g. S3 HEAD, NFS stat),
+        // running all requests in parallel so the total latency is bounded by the
+        // slowest individual call rather than the sum of all calls.
+        const int MaxSizeConcurrency = 8;
+        using var semaphore = new SemaphoreSlim(MaxSizeConcurrency, MaxSizeConcurrency);
+
+        var sizeTasks = new Task<long?>[items.Count];
+        for (int i = 0; i < items.Count; i++)
+        {
+            if (items[i] is not IFile file)
+            {
+                sizeTasks[i] = Task.FromResult<long?>(null);
+                continue;
+            }
+
+            // Re-use a size already cached in the index (e.g. from a prior Open).
+            if (_index.TryGet(childPaths[i]) is { Size: long indexedSize })
+            {
+                sizeTasks[i] = Task.FromResult<long?>(indexedSize);
+                continue;
+            }
+
+            var capturedFile = file;
+            var capturedPath = childPaths[i];
+            sizeTasks[i] = Task.Run(async () =>
+            {
+                await semaphore.WaitAsync(CancellationToken.None);
+                try
+                {
+                    return await _sizeProviders.GetProvider(capturedFile).GetSizeAsync(capturedFile);
+                }
+                catch
+                {
+                    return (long?)null;
+                }
+                finally
+                {
+                    semaphore.Release();
+                }
+            });
+        }
+
+        // WinFsp callbacks run on dedicated WinFsp threadpool threads with no
+        // SynchronizationContext, so blocking here does not risk a deadlock.
+        long?[] sizes = Task.WhenAll(sizeTasks).GetAwaiter().GetResult();
+
+        List<DirectoryEntry> result = new(items.Count);
+        for (int i = 0; i < items.Count; i++)
+        {
+            IStorableChild item = items[i];
             bool isDir = item is IFolder;
             DateTimeOffset? created = GetCreatedAt(item);
             DateTimeOffset? accessed = GetLastAccessedAt(item);
             DateTimeOffset? modified = GetLastModifiedAt(item);
+            long? size = sizes[i];
 
-            string childPath = CombineNormalizedPath(ctx.NormalizedPath, item.Name);
-            if (item is IFolder childFolder)
-            {
-                EnsureFolderWatcher(childFolder, childPath);
-                _folderObjects.TryAdd(childPath, childFolder);
-            }
-
-            // Re-use a previously cached size (e.g. from a prior Open call) rather
-            // than making a network call for every file during a directory listing.
-            long? knownSize = item is IFile
-                ? (_index.TryGet(childPath) is { Size: long cachedSize } ? cachedSize : null)
-                : null;
-
-            _index.AddOrUpdate(childPath, new PathIndexEntry
+            _index.AddOrUpdate(childPaths[i], new PathIndexEntry
             {
                 Id = item.Id,
                 Name = item.Name,
                 IsFile = !isDir,
-                Size = knownSize,
+                Size = size,
                 CreatedAt = created == DateTimeOffset.MinValue ? null : created,
                 LastModifiedAt = modified == DateTimeOffset.MinValue ? null : modified,
                 LastAccessedAt = accessed == DateTimeOffset.MinValue ? null : accessed,
@@ -978,7 +1025,7 @@ public sealed class OwlMountFileSystem : FileSystemBase
             result.Add(new DirectoryEntry(
                 item.Name,
                 isDir,
-                knownSize ?? 0,
+                size ?? 0,
                 created ?? DateTimeOffset.UnixEpoch,
                 accessed ?? DateTimeOffset.UnixEpoch,
                 modified ?? DateTimeOffset.UnixEpoch));
