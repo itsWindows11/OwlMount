@@ -122,7 +122,7 @@ public sealed class BlockCacheTests : IDisposable
     public async Task Invalidate_RemovesCachedBlocksSoNextReadRefetches()
     {
         byte[] original = MakeContent(300);
-        byte[] updated = MakeContent(300).Reverse().ToArray();
+        byte[] updated = [.. MakeContent(300).Reverse()];
         var file = new TestFile("f7", original);
         var cache = new BlockCache("test", blockSize: 512, cacheDir: _tempDir);
         var firstReader = new CountingRangeReader(original);
@@ -144,7 +144,7 @@ public sealed class BlockCacheTests : IDisposable
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     private static byte[] MakeContent(int length) =>
-        Enumerable.Range(0, length).Select(i => (byte)(i % 256)).ToArray();
+        [.. Enumerable.Range(0, length).Select(i => (byte)(i % 256))];
 }
 
 // ── Test doubles ──────────────────────────────────────────────────────────────

@@ -6,7 +6,7 @@ using OwlCore.Storage.Memory;
 using OwlCore.Storage.System.IO;
 using OwlMount.Core.Cache;
 using OwlMount.Core.Registry;
-using OwlMount.WinFspHost;
+using OwlMount.Core.Windows;
 
 namespace OwlMount.Tests;
 
@@ -235,11 +235,10 @@ public sealed class FolderContractTests : IAsyncLifetime
     /// <c>OwlMountProvider.StartDirectoryEnumerationCallback</c> uses.
     /// </summary>
     private static List<(string Name, bool IsDirectory)> ProviderEnumerate(IFolder folder) =>
-        folder.GetItemsAsync()
+        [.. folder.GetItemsAsync()
               .ToBlockingEnumerable()
               .OrderBy(x => x.Name, StringComparer.OrdinalIgnoreCase)
-              .Select(x => (x.Name, IsDirectory: x is IFolder))
-              .ToList();
+              .Select(x => (x.Name, IsDirectory: x is IFolder))];
 
     // ── Tests ─────────────────────────────────────────────────────────────────
 
@@ -255,8 +254,8 @@ public sealed class FolderContractTests : IAsyncLifetime
     {
         if (ShouldSkip()) return;
 
-        string[] localNames     = ProviderEnumerate(_local!).Select(e => e.Name).ToArray();
-        string[] projectedNames = ProviderEnumerate(_projected!).Select(e => e.Name).ToArray();
+        string[] localNames     = [.. ProviderEnumerate(_local!).Select(e => e.Name)];
+        string[] projectedNames = [.. ProviderEnumerate(_projected!).Select(e => e.Name)];
 
         Assert.Equal(ExpectedRootSorted, localNames);
         Assert.Equal(ExpectedRootSorted, projectedNames);
@@ -277,8 +276,8 @@ public sealed class FolderContractTests : IAsyncLifetime
 
         foreach (var folder in new[] { _local!, _projected! })
         {
-            string[] files = ProviderEnumerate(folder)
-                .Where(e => !e.IsDirectory).Select(e => e.Name).ToArray();
+            string[] files = [.. ProviderEnumerate(folder)
+                .Where(e => !e.IsDirectory).Select(e => e.Name)];
             Assert.Contains(FileAlpha, files);
             Assert.Contains(FileBeta,  files);
             Assert.Contains(FileZzz,   files);
@@ -292,8 +291,8 @@ public sealed class FolderContractTests : IAsyncLifetime
 
         foreach (var folder in new[] { _local!, _projected! })
         {
-            string[] folders = ProviderEnumerate(folder)
-                .Where(e => e.IsDirectory).Select(e => e.Name).ToArray();
+            string[] folders = [.. ProviderEnumerate(folder)
+                .Where(e => e.IsDirectory).Select(e => e.Name)];
             Assert.Contains(DirGamma, folders);
             Assert.Contains(DirEmpty, folders);
         }
