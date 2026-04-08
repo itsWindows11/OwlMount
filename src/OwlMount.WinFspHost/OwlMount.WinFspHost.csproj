@@ -11,10 +11,8 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- Filesystem backends -->
-    <PackageReference Include="winfsp.net" Version="2.1.25156" />
-    <PackageReference Include="Microsoft.Windows.ProjFS" Version="2.1.0" />
-    <ProjectReference Include="..\..\src\OwlMount.Core\OwlMount.Core.csproj" />
+    <!-- Core Windows filesystem backend library -->
+    <ProjectReference Include="..\..\src\OwlMount.Core.Windows\OwlMount.Core.Windows.csproj" />
     <PackageReference Include="OwlCore.Storage" Version="0.15.0" />
     <!-- Cloud / network providers -->
     <PackageReference Include="OwlCore.Kubo" Version="0.21.0" />

@@ -146,7 +146,7 @@ public sealed class FolderContractTests : IAsyncLifetime
             enableNegativePathCache: false,
             notificationMappings:    Array.Empty<NotificationMapping>());
 
-        provider.Instance = _vi;
+        provider.SetInstance(_vi, _projFsRoot);
 
         HResult mark = VirtualizationInstance.MarkDirectoryAsVirtualizationRoot(
             _projFsRoot, _vi.VirtualizationInstanceId);

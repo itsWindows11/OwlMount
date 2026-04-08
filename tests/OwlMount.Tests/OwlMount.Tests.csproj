@@ -16,7 +16,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\OwlMount.Core\OwlMount.Core.csproj" />
-    <ProjectReference Include="..\..\src\OwlMount.WinFspHost\OwlMount.WinFspHost.csproj" />
+    <ProjectReference Include="..\..\src\OwlMount.Core.Windows\OwlMount.Core.Windows.csproj" />
     <PackageReference Include="OwlCore.Storage" Version="0.15.0" />
   </ItemGroup>
 

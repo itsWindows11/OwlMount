@@ -9,7 +9,7 @@ using OwlMount.Core.Index;
 using OwlMount.Core.IO;
 using OwlMount.Core.Registry;
 
-namespace OwlMount.WinFspHost;
+namespace OwlMount.Core.Windows;
 
 /// <summary>
 /// Windows Projected File System (ProjFS) <see cref="IRequiredCallbacks"/> implementation
@@ -27,31 +27,54 @@ public sealed class OwlMountProvider : IRequiredCallbacks
     private readonly RangeReaderRegistry _rangeReaders;
     private readonly SizeProviderRegistry _sizeProviders;
 
+    private VirtualizationInstance? _vi;
+    private string? _virtRoot;
+
     /// <summary>
-    /// Set to the active <see cref="VirtualizationInstance"/> before
-    /// <see cref="VirtualizationInstance.StartVirtualizing"/> is called so callbacks
-    /// can write placeholder info and file data back to ProjFS.
+    /// Called by <see cref="Backends.ProjFsBackend"/> before
+    /// <see cref="VirtualizationInstance.StartVirtualizing"/> is invoked.
+    /// Registers write-back notification delegates on <paramref name="vi"/> when
+    /// the provider is not read-only.
     /// </summary>
-    public VirtualizationInstance? Instance { get; set; }
+    public void SetInstance(VirtualizationInstance vi, string virtRoot)
+    {
+        _vi       = vi;
+        _virtRoot = virtRoot;
 
-    /// <summary>Throws if <see cref="Instance"/> has not been set yet.</summary>
+        if (_isReadOnly) return;
+
+        // Wire up write-back notification delegates.
+        vi.OnNotifyNewFileCreated       = OnNotifyNewFileCreated;
+        vi.OnNotifyFileOverwritten      = OnNotifyFileOverwritten;
+        vi.OnNotifyFileRenamed          = OnNotifyFileRenamed;
+        vi.OnNotifyPreDelete            = OnNotifyPreDelete;
+        vi.OnNotifyPreRename            = OnNotifyPreRename;
+        vi.OnNotifyPreCreateHardlink    = OnNotifyPreCreateHardlink;
+        vi.OnNotifyFilePreConvertToFull = OnNotifyFilePreConvertToFull;
+        vi.OnNotifyFileHandleClosedFileModifiedOrDeleted = OnNotifyFileHandleClosedFileModifiedOrDeleted;
+    }
+
+    /// <summary>Throws if <see cref="SetInstance"/> has not been called yet.</summary>
     private VirtualizationInstance RequireInstance() =>
-        Instance ?? throw new InvalidOperationException(
-            "VirtualizationInstance has not been set. Assign OwlMountProvider.Instance before starting virtualization.");
+        _vi ?? throw new InvalidOperationException(
+            "VirtualizationInstance has not been set. Call SetInstance before starting virtualization.");
 
+    private readonly bool _isReadOnly;
     private readonly ConcurrentDictionary<Guid, EnumerationState> _enumerations = new();
 
     public OwlMountProvider(
         IFolder root,
         BlockCache blockCache,
         RangeReaderRegistry rangeReaders,
-        SizeProviderRegistry? sizeProviders = null)
+        SizeProviderRegistry? sizeProviders = null,
+        bool readOnly = false)
     {
-        _root         = root;
-        _index        = new PathIndex();
-        _blockCache   = blockCache;
-        _rangeReaders = rangeReaders;
+        _root          = root;
+        _index         = new PathIndex();
+        _blockCache    = blockCache;
+        _rangeReaders  = rangeReaders;
         _sizeProviders = sizeProviders ?? new SizeProviderRegistry();
+        _isReadOnly    = readOnly || root is not IModifiableFolder;
     }
 
     // ── IRequiredCallbacks ────────────────────────────────────────────────────
@@ -158,8 +181,8 @@ public sealed class OwlMountProvider : IRequiredCallbacks
                 entry.IsDirectory ? 0L : entry.Size,
                 entry.IsDirectory,
                 entry.IsDirectory
-                    ? FileAttributes.Directory | FileAttributes.ReadOnly
-                    : FileAttributes.ReadOnly,
+                    ? (FileAttributes.Directory | (_isReadOnly ? FileAttributes.ReadOnly : 0))
+                    : (_isReadOnly ? FileAttributes.ReadOnly : FileAttributes.Archive),
                 entry.CreatedAt.DateTime,
                 entry.LastAccessed.DateTime,
                 entry.LastModified.DateTime,
@@ -197,15 +220,15 @@ public sealed class OwlMountProvider : IRequiredCallbacks
             size = entry.Size ?? 0;
         }
 
-        return RequireInstance().WritePlaceholderInfo(
+        return _vi!.WritePlaceholderInfo(
             relativePath:    relativePath,
             creationTime:    entry.CreatedAt?.DateTime ?? DateTime.MinValue,
             lastAccessTime:  (entry.LastModifiedAt ?? entry.CreatedAt)?.DateTime ?? DateTime.MinValue,
             lastWriteTime:   entry.LastModifiedAt?.DateTime ?? DateTime.MinValue,
             changeTime:      entry.LastModifiedAt?.DateTime ?? DateTime.MinValue,
             fileAttributes:  entry.IsFile
-                ? FileAttributes.ReadOnly
-                : FileAttributes.Directory | FileAttributes.ReadOnly,
+                ? (_isReadOnly ? FileAttributes.ReadOnly : FileAttributes.Archive)
+                : (FileAttributes.Directory | (_isReadOnly ? FileAttributes.ReadOnly : 0)),
             endOfFile:       size,
             isDirectory:     !entry.IsFile,
             contentId:       null,
@@ -338,38 +361,184 @@ public sealed class OwlMountProvider : IRequiredCallbacks
     private IFile?   GetChildFile(IFolder folder, string name)   => GetChild(folder, name) as IFile;
     private IFolder? GetChildFolder(IFolder folder, string name) => GetChild(folder, name) as IFolder;
 
-    // ── Timestamp helpers ─────────────────────────────────────────────────────
+    private static DateTimeOffset? GetCreatedAt(IStorable item)      => StorageTimestampHelper.GetCreatedAt(item);
+    private static DateTimeOffset? GetLastModifiedAt(IStorable item) => StorageTimestampHelper.GetLastModifiedAt(item);
 
-    private static DateTimeOffset? GetCreatedAt(IStorable item)
+    
+
+    // ── Write-back notification delegates ────────────────────────────────────
+    // Registered on VirtualizationInstance in SetInstance when !_isReadOnly.
+    // Delegate signatures must match the exact types in Microsoft.Windows.ProjFS.
+
+    private void OnNotifyNewFileCreated(
+        string relativePath, bool isDirectory,
+        uint triggeringProcessId, string triggeringProcessImageFileName,
+        out NotificationType notificationMask)
     {
-        if (item is ICreatedAtOffset cao)
-        {
-            DateTimeOffset? v = cao.CreatedAtOffset.GetValueAsync().GetAwaiter().GetResult();
-            if (v is not null && v != DateTimeOffset.MinValue) return v;
-        }
-        if (item is ICreatedAt ca)
-        {
-            DateTime? v = ca.CreatedAt.GetValueAsync().GetAwaiter().GetResult();
-            if (v is not null && v != DateTime.MinValue)
-                return new DateTimeOffset(v.Value, TimeSpan.Zero);
-        }
-        return null;
+        notificationMask = NotificationType.None;
+        string norm = NormalizeProjFsPath(relativePath);
+        if (isDirectory) TryCreateBackingDirectory(norm);
+        // New file content is synced when handle closes (OnNotifyFileHandleClosedFileModifiedOrDeleted).
     }
 
-    private static DateTimeOffset? GetLastModifiedAt(IStorable item)
+    private void OnNotifyFileOverwritten(
+        string relativePath, bool isDirectory,
+        uint triggeringProcessId, string triggeringProcessImageFileName,
+        out NotificationType notificationMask)
     {
-        if (item is ILastModifiedAtOffset lmo)
+        notificationMask = NotificationType.None;
+        if (!isDirectory) TrySyncFileFromVirtRoot(NormalizeProjFsPath(relativePath));
+    }
+
+    private bool OnNotifyPreDelete(
+        string relativePath, bool isDirectory,
+        uint triggeringProcessId, string triggeringProcessImageFileName)
+        => true; // allow — actual delete synced in OnNotifyFileHandleClosedFileModifiedOrDeleted
+
+    private bool OnNotifyPreRename(
+        string relativePath, string destinationPath,
+        uint triggeringProcessId, string triggeringProcessImageFileName)
+        => true; // allow — rename synced in OnNotifyFileRenamed
+
+    private bool OnNotifyPreCreateHardlink(
+        string relativePath, string destinationPath,
+        uint triggeringProcessId, string triggeringProcessImageFileName)
+        => false; // hard links are not supported
+
+    private void OnNotifyFileRenamed(
+        string relativePath, string destinationPath, bool isDirectory,
+        uint triggeringProcessId, string triggeringProcessImageFileName,
+        out NotificationType notificationMask)
+    {
+        notificationMask = NotificationType.None;
+        TryRenameInBackingStore(
+            NormalizeProjFsPath(relativePath),
+            NormalizeProjFsPath(destinationPath),
+            isDirectory);
+    }
+
+    private bool OnNotifyFilePreConvertToFull(
+        string relativePath,
+        uint triggeringProcessId, string triggeringProcessImageFileName)
+        => true; // allow hydration for write
+
+    private void OnNotifyFileHandleClosedFileModifiedOrDeleted(
+        string relativePath, bool isDirectory,
+        bool isFileModified, bool isFileDeleted,
+        uint triggeringProcessId, string triggeringProcessImageFileName)
+    {
+        string norm = NormalizeProjFsPath(relativePath);
+        if (isFileDeleted)
+            TryDeleteFromBackingStore(norm, isDirectory);
+        else if (isFileModified && !isDirectory)
+            TrySyncFileFromVirtRoot(norm);
+    }
+
+    // ── Write-back helpers ────────────────────────────────────────────────────
+
+    private void TryCreateBackingDirectory(string normalizedPath)
+    {
+        try
         {
-            DateTimeOffset? v = lmo.LastModifiedAtOffset.GetValueAsync().GetAwaiter().GetResult();
-            if (v is not null && v != DateTimeOffset.MinValue) return v;
+            string[] segments = normalizedPath.Split('/');
+            IFolder current   = _root;
+            for (int i = 0; i < segments.Length - 1; i++)
+            {
+                IFolder? sub = GetChildFolder(current, segments[i]);
+                if (sub is null) return;
+                current = sub;
+            }
+            if (current is IModifiableFolder mf)
+                mf.CreateFolderAsync(segments[^1], overwrite: false, CancellationToken.None).GetAwaiter().GetResult();
         }
-        if (item is ILastModifiedAt lm)
+        catch { /* best-effort */ }
+    }
+
+    private void TrySyncFileFromVirtRoot(string normalizedPath)
+    {
+        if (_virtRoot is null) return;
+        try
         {
-            DateTime? v = lm.LastModifiedAt.GetValueAsync().GetAwaiter().GetResult();
-            if (v is not null && v != DateTime.MinValue)
-                return new DateTimeOffset(v.Value, TimeSpan.Zero);
+            string diskPath = Path.Combine(_virtRoot, normalizedPath.Replace('/', Path.DirectorySeparatorChar));
+            if (!File.Exists(diskPath)) return;
+
+            string[] segments = normalizedPath.Split('/');
+            IFolder current   = _root;
+            for (int i = 0; i < segments.Length - 1; i++)
+            {
+                IFolder? sub = GetChildFolder(current, segments[i]);
+                if (sub is null)
+                {
+                    // Ensure the parent directory exists in the backing store.
+                    if (current is IModifiableFolder mf2)
+                        current = mf2.CreateFolderAsync(segments[i], overwrite: false, CancellationToken.None).GetAwaiter().GetResult();
+                    else
+                        return;
+                }
+                else
+                {
+                    current = sub;
+                }
+            }
+            if (current is not IModifiableFolder mf) return;
+
+            using var diskStream = File.OpenRead(diskPath);
+            IFile backingFile = mf.CreateFileAsync(segments[^1], overwrite: true, CancellationToken.None).GetAwaiter().GetResult();
+            using Stream backingStream = backingFile.OpenStreamAsync(FileAccess.Write).GetAwaiter().GetResult();
+            diskStream.CopyTo(backingStream);
         }
-        return null;
+        catch { /* best-effort */ }
+    }
+
+    private void TryDeleteFromBackingStore(string normalizedPath, bool isDirectory)
+    {
+        try
+        {
+            string[] segments = normalizedPath.Split('/');
+            IFolder current   = _root;
+            for (int i = 0; i < segments.Length - 1; i++)
+            {
+                IFolder? sub = GetChildFolder(current, segments[i]);
+                if (sub is null) return;
+                current = sub;
+            }
+            if (current is not IModifiableFolder mf) return;
+            IStorableChild? child = GetChild(current, segments[^1]);
+            if (child is null) return;
+            mf.DeleteAsync(child).GetAwaiter().GetResult();
+        }
+        catch { /* best-effort */ }
+    }
+
+    private void TryRenameInBackingStore(string oldNorm, string newNorm, bool isDirectory)
+    {
+        // IModifiableFolder has no rename/move API; implement as copy-then-delete.
+        if (_virtRoot is null) return;
+        try
+        {
+            string[] newSegs  = newNorm.Split('/');
+            IFolder newParent = _root;
+            for (int i = 0; i < newSegs.Length - 1; i++)
+            {
+                IFolder? sub = GetChildFolder(newParent, newSegs[i]);
+                if (sub is null) return;
+                newParent = sub;
+            }
+
+            if (!isDirectory)
+            {
+                // Copy content from virtRoot at the new path, then delete old backing entry.
+                TrySyncFileFromVirtRoot(newNorm);
+                TryDeleteFromBackingStore(oldNorm, isDirectory: false);
+            }
+            else
+            {
+                // For directories, create the new dir in backing and delete the old one.
+                TryCreateBackingDirectory(newNorm);
+                TryDeleteFromBackingStore(oldNorm, isDirectory: true);
+            }
+        }
+        catch { /* best-effort */ }
     }
 
     // ── Enumeration state ─────────────────────────────────────────────────────

@@ -12,7 +12,7 @@ using OwlMount.Core.Index;
 using OwlMount.Core.Registry;
 using FileInfo = Fsp.Interop.FileInfo;
 
-namespace OwlMount.WinFspHost;
+namespace OwlMount.Core.Windows;
 
 /// <summary>
 /// WinFsp <see cref="FileSystemBase"/> implementation that exposes an
@@ -1268,62 +1268,9 @@ public sealed class OwlMountFileSystem : FileSystemBase
         }
     }
 
-    private static DateTimeOffset? GetCreatedAt(IStorable item)
-    {
-        if (item is ICreatedAtOffset cao)
-        {
-            DateTimeOffset? value = cao.CreatedAtOffset.GetValueAsync().GetAwaiter().GetResult();
-            if (value is not null && value != DateTimeOffset.MinValue)
-                return value;
-        }
-
-        if (item is ICreatedAt ca)
-        {
-            DateTime? value = ca.CreatedAt.GetValueAsync().GetAwaiter().GetResult();
-            if (value is not null && value != DateTime.MinValue)
-                return new DateTimeOffset(value.Value, TimeSpan.Zero);
-        }
-
-        return null;
-    }
-
-    private static DateTimeOffset? GetLastAccessedAt(IStorable item)
-    {
-        if (item is ILastAccessedAtOffset lao)
-        {
-            DateTimeOffset? value = lao.LastAccessedAtOffset.GetValueAsync().GetAwaiter().GetResult();
-            if (value is not null && value != DateTimeOffset.MinValue)
-                return value;
-        }
-
-        if (item is ILastAccessedAt la)
-        {
-            DateTime? value = la.LastAccessedAt.GetValueAsync().GetAwaiter().GetResult();
-            if (value is not null && value != DateTime.MinValue)
-                return new DateTimeOffset(value.Value, TimeSpan.Zero);
-        }
-
-        return null;
-    }
-
-    private static DateTimeOffset? GetLastModifiedAt(IStorable item)
-    {
-        if (item is ILastModifiedAtOffset lmo)
-        {
-            DateTimeOffset? value = lmo.LastModifiedAtOffset.GetValueAsync().GetAwaiter().GetResult();
-            if (value is not null && value != DateTimeOffset.MinValue)
-                return value;
-        }
-
-        if (item is ILastModifiedAt lm)
-        {
-            DateTime? value = lm.LastModifiedAt.GetValueAsync().GetAwaiter().GetResult();
-            if (value is not null && value != DateTime.MinValue)
-                return new DateTimeOffset(value.Value, TimeSpan.Zero);
-        }
-
-        return null;
-    }
+    private static DateTimeOffset? GetCreatedAt(IStorable item)      => StorageTimestampHelper.GetCreatedAt(item);
+    private static DateTimeOffset? GetLastAccessedAt(IStorable item) => StorageTimestampHelper.GetLastAccessedAt(item);
+    private static DateTimeOffset? GetLastModifiedAt(IStorable item) => StorageTimestampHelper.GetLastModifiedAt(item);
 
     private static ulong ToFileTime(DateTimeOffset? dto)
     {

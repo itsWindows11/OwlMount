@@ -13,7 +13,7 @@ using OwlCore.Storage.SharpCompress;
 using OwlCore.Storage.System.IO;
 using OwlMount.Core.Cache;
 using OwlMount.Core.Registry;
-using OwlMount.WinFspHost;
+using OwlMount.Core.Windows.Backends;
 
 [SupportedOSPlatform("windows")]
 static partial class Program
@@ -279,7 +279,7 @@ static partial class Program
         string mountPoint  = driveLetter + ":";
 
         // ProjFS is always read-only; ensure the flag reflects reality
-        bool isReadOnly = forceReadOnly || root is not IModifiableFolder || backend == "projfs";
+        bool isReadOnly = forceReadOnly || root is not IModifiableFolder;
 
         Console.WriteLine($"OwlMount — provider: {provider}  backend: {backend}");
         Console.WriteLine($"  Root   : {displayRoot}");
@@ -312,7 +312,7 @@ static partial class Program
                 return 1;
             }
 #pragma warning disable CA1416 // resolved by the version check above
-            vfsBackend = new ProjFsBackend(root, blockCache, rangeReaders, sizeProviders);
+            vfsBackend = new ProjFsBackend(root, blockCache, rangeReaders, sizeProviders, isReadOnly);
 #pragma warning restore CA1416
         }
         else
