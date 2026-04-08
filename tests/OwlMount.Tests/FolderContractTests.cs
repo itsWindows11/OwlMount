@@ -6,7 +6,6 @@ using OwlCore.Storage.Memory;
 using OwlCore.Storage.System.IO;
 using OwlMount.Core.Cache;
 using OwlMount.Core.Registry;
-using OwlMount.Core.Windows;
 
 namespace OwlMount.Tests;
 
@@ -144,7 +143,7 @@ public sealed class FolderContractTests : IAsyncLifetime
             poolThreadCount:         0,
             concurrentThreadCount:   0,
             enableNegativePathCache: false,
-            notificationMappings:    Array.Empty<NotificationMapping>());
+            notificationMappings: []);
 
         provider.Instance = _vi;
 

@@ -66,7 +66,7 @@ public sealed class ProjFsBackend : IOwlMountBackend
             poolThreadCount:         0,
             concurrentThreadCount:   0,
             enableNegativePathCache: false,
-            notificationMappings:    Array.Empty<NotificationMapping>());
+            notificationMappings: []);
 
         _provider.Instance = _vi;
 
