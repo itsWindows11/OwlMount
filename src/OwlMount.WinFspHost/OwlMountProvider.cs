@@ -99,6 +99,7 @@ public sealed class OwlMountProvider : IRequiredCallbacks
                         isDir,
                         0,
                         created  ?? DateTimeOffset.UnixEpoch,
+                        modified ?? DateTimeOffset.UnixEpoch,
                         modified ?? DateTimeOffset.UnixEpoch);
                 })
                 .ToList();
@@ -160,7 +161,7 @@ public sealed class OwlMountProvider : IRequiredCallbacks
                     ? FileAttributes.Directory | FileAttributes.ReadOnly
                     : FileAttributes.ReadOnly,
                 entry.CreatedAt.DateTime,
-                entry.LastModified.DateTime,
+                entry.LastAccessed.DateTime,
                 entry.LastModified.DateTime,
                 entry.LastModified.DateTime);
 

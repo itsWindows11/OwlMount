@@ -148,5 +148,22 @@ public sealed class BlockCache : IDisposable
         return string.Concat(name.Select(c => Array.IndexOf(invalid, c) >= 0 ? '_' : c));
     }
 
+    /// <summary>
+    /// Removes all on-disk cache blocks for the file identified by <paramref name="fileId"/>.
+    /// This is a best-effort operation; individual delete failures are silently ignored.
+    /// </summary>
+    public void Invalidate(string fileId)
+    {
+        string fileKey = ComputeFileKey(fileId);
+        try
+        {
+            foreach (string path in Directory.EnumerateFiles(_cacheDir, $"{fileKey}_*.blk"))
+            {
+                try { File.Delete(path); } catch { /* best-effort */ }
+            }
+        }
+        catch { /* directory may not exist */ }
+    }
+
     public void Dispose() { }
 }

@@ -25,6 +25,24 @@ public sealed class PathIndex
         _entries.TryRemove(normalizedPath, out _);
 
     /// <summary>
+    /// Removes the entry at <paramref name="normalizedPath"/> and all entries
+    /// whose paths begin with <c><paramref name="normalizedPath"/>/</c>.
+    /// </summary>
+    public void RemoveSubtree(string normalizedPath)
+    {
+        _entries.TryRemove(normalizedPath, out _);
+
+        if (string.IsNullOrEmpty(normalizedPath)) return;
+
+        string prefix = normalizedPath + "/";
+        foreach (string key in _entries.Keys)
+        {
+            if (key.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                _entries.TryRemove(key, out _);
+        }
+    }
+
+    /// <summary>
     /// Normalizes a Windows-style path to a forward-slash-separated path with no
     /// leading or trailing slashes. Examples:
     /// <list type="bullet">

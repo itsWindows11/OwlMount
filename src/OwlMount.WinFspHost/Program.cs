@@ -3,31 +3,27 @@ using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using Amazon.S3;
 using Ipfs.Http;
-using Microsoft.Windows.ProjFS;
 using NfsSharp;
 using OwlCore.Kubo;
 using OwlCore.Storage;
 using OwlCore.Storage.AmazonS3;
 using OwlCore.Storage.Memory;
+using OwlCore.Storage.SharpCompress;
+using OwlCore.Storage.System.IO;
 using OwlMount.Core.Cache;
 using OwlMount.Core.Registry;
 using OwlMount.WinFspHost;
 using OwlMount.WinFspHost.Providers.Nfs;
 
-[SupportedOSPlatform("windows10.0.17763.0")]
-static class Program
+[SupportedOSPlatform("windows")]
+static partial class Program
 {
     static async Task<int> Main(string[] args)
     {
-        // Support both the new subcommand form ("mount"/"unmount"/"list") and the
-        // legacy flag-only form ("--provider …") for backward compatibility.
         string sub = args.Length > 0 ? args[0].ToLowerInvariant() : "help";
 
         if (sub.StartsWith("--") || args.Length == 0)
-        {
-            // Legacy: no subcommand — treat the whole args array as "mount" args.
             return await RunMountAsync(args);
-        }
 
         return sub switch
         {
@@ -42,10 +38,14 @@ static class Program
 
     static async Task<int> RunMountAsync(string[] args)
     {
-        string  provider   = "memory";
-        string  letter     = "M";
-        string? label      = null;
-        string? path       = null;
+        string  provider      = "memory";
+        string  backend       = "winfsp";
+        string  letter        = "M";
+        string? label         = null;
+        string? path          = null;
+        bool    forceReadOnly = false;
+        ulong?  totalSize     = null;
+        ulong?  freeSize      = null;
         // S3
         string? s3Bucket   = null;
         string? s3Prefix   = null;
@@ -61,28 +61,45 @@ static class Program
         string? nfsHost    = null;
         string? nfsExport  = null;
         string? nfsPath    = "/";
+        // Archive
+        string? archiveFile = null;
 
-        for (int i = 0; i < args.Length - 1; i++)
+        for (int i = 0; i < args.Length; i++)
         {
             switch (args[i].ToLowerInvariant())
             {
-                case "--provider":    provider   = args[++i]; break;
-                case "--letter":      letter     = args[++i]; break;
-                case "--label":       label      = args[++i]; break;
-                case "--path":        path       = args[++i]; break;
-                case "--bucket":      s3Bucket   = args[++i]; break;
-                case "--prefix":      s3Prefix   = args[++i]; break;
-                case "--access-key":  s3Key      = args[++i]; break;
-                case "--secret-key":  s3Secret   = args[++i]; break;
-                case "--region":      s3Region   = args[++i]; break;
-                case "--endpoint":    s3Endpoint = args[++i]; break;
-                case "--api-url":     apiUrl     = args[++i]; break;
-                case "--cid":         cid        = args[++i]; break;
-                case "--ipns":        ipnsAddr   = args[++i]; break;
-                case "--host":        nfsHost    = args[++i]; break;
-                case "--export":      nfsExport  = args[++i]; break;
-                case "--nfs-path":    nfsPath    = args[++i]; break;
+                case "--provider":     provider    = args[++i]; break;
+                case "--backend":      backend     = args[++i]; break;
+                case "--letter":       letter      = args[++i]; break;
+                case "--label":        label       = args[++i]; break;
+                case "--path":         path        = args[++i]; break;
+                case "--archive-file": archiveFile = args[++i]; break;
+                case "--bucket":       s3Bucket    = args[++i]; break;
+                case "--prefix":       s3Prefix    = args[++i]; break;
+                case "--access-key":   s3Key       = args[++i]; break;
+                case "--secret-key":   s3Secret    = args[++i]; break;
+                case "--region":       s3Region    = args[++i]; break;
+                case "--endpoint":     s3Endpoint  = args[++i]; break;
+                case "--api-url":      apiUrl      = args[++i]; break;
+                case "--cid":          cid         = args[++i]; break;
+                case "--ipns":         ipnsAddr    = args[++i]; break;
+                case "--host":         nfsHost     = args[++i]; break;
+                case "--export":       nfsExport   = args[++i]; break;
+                case "--nfs-path":     nfsPath     = args[++i]; break;
+                case "--read-only":
+                case "--readonly":
+                    forceReadOnly = true;
+                    break;
             }
+        }
+
+        // ── Validate backend ──────────────────────────────────────────────────
+        backend = backend.ToLowerInvariant();
+        if (backend is not ("winfsp" or "projfs"))
+        {
+            Console.Error.WriteLine(
+                $"Error: unknown backend '{backend}'. Valid values: winfsp, projfs");
+            return 1;
         }
 
         // ── Resolve the root IFolder ──────────────────────────────────────────
@@ -93,9 +110,50 @@ static class Program
         {
             // ── memory ────────────────────────────────────────────────────────
             case "memory":
-                root        = new MemoryFolder(id: "memory-root", name: "memory-root");
+                root = new MemoryFolder(id: "memory-root", name: "memory-root");
                 displayRoot = "(in-memory, starts empty)";
+                (totalSize, freeSize) = GetMemoryVolumeSpace();
                 break;
+
+            // ── archive ───────────────────────────────────────────────────────
+            case "archive":
+            {
+                string resolvedArchivePath = archiveFile ?? path ?? string.Empty;
+                if (string.IsNullOrWhiteSpace(resolvedArchivePath))
+                {
+                    Console.Error.WriteLine("Error: --archive-file is required for provider 'archive'.");
+                    return 1;
+                }
+
+                string fullArchivePath = Path.GetFullPath(resolvedArchivePath);
+                if (!File.Exists(fullArchivePath))
+                {
+                    Console.Error.WriteLine($"Error: archive file not found: {fullArchivePath}");
+                    return 1;
+                }
+
+                root = new ArchiveFolder(new SystemFile(fullArchivePath));
+                displayRoot = fullArchivePath;
+                totalSize = TryGetArchiveVolumeSize(fullArchivePath);
+                forceReadOnly = true; // archives are inherently read-only
+                break;
+            }
+
+            // ── local (filesystem path) ───────────────────────────────────────
+            case "local":
+            {
+                string resolvedPath = path ?? string.Empty;
+                if (string.IsNullOrWhiteSpace(resolvedPath) || !Directory.Exists(resolvedPath))
+                {
+                    Console.Error.WriteLine(
+                        $"Error: --path must be an existing directory for provider 'local'.");
+                    return 1;
+                }
+
+                root = new SystemFolder(Path.GetFullPath(resolvedPath));
+                displayRoot = path!;
+                break;
+            }
 
             // ── kubo-mfs ──────────────────────────────────────────────────────
             case "kubo-mfs":
@@ -104,6 +162,7 @@ static class Program
                 var client = new IpfsClient(apiUrl ?? "http://127.0.0.1:5001");
                 root        = new MfsFolder(mfsPath, client);
                 displayRoot = $"kubo MFS {mfsPath} @ {client.ApiUri}";
+                (totalSize, freeSize) = await TryGetKuboRepositorySpaceAsync(client);
                 break;
             }
 
@@ -115,9 +174,11 @@ static class Program
                     Console.Error.WriteLine("Error: --cid is required for provider 'kubo-ipfs'.");
                     return 1;
                 }
+
                 var client = new IpfsClient(apiUrl ?? "http://127.0.0.1:5001");
                 root        = new IpfsFolder(cid, client);
                 displayRoot = $"ipfs://{cid}";
+                (totalSize, freeSize) = await TryGetDagVolumeSpaceAsync(client, $"/ipfs/{cid}");
                 break;
             }
 
@@ -129,9 +190,11 @@ static class Program
                     Console.Error.WriteLine("Error: --ipns is required for provider 'kubo-ipns'.");
                     return 1;
                 }
+
                 var client = new IpfsClient(apiUrl ?? "http://127.0.0.1:5001");
                 root        = new IpnsFolder(ipnsAddr, client);
                 displayRoot = $"ipns://{ipnsAddr}";
+                (totalSize, freeSize) = await TryGetKuboRepositorySpaceAsync(client);
                 break;
             }
 
@@ -165,10 +228,10 @@ static class Program
                 IAmazonS3 s3Client = (s3Key, s3Secret) switch
                 {
                     ({ } k, { } s) => new AmazonS3Client(k, s, s3Config),
-                    _              => new AmazonS3Client(s3Config), // use ambient credentials
+                    _ => new AmazonS3Client(s3Config),
                 };
 
-                root        = new S3Folder(s3Client, s3Bucket, s3Prefix ?? string.Empty);
+                root = new S3Folder(s3Client, s3Bucket, s3Prefix ?? string.Empty);
                 displayRoot = $"s3://{s3Bucket}/{s3Prefix ?? string.Empty}";
                 break;
             }
@@ -187,6 +250,7 @@ static class Program
                 await nfsClient.ConnectAsync();
                 root        = await NfsFolder.GetFromNfsPathAsync(nfsClient, nfsPath ?? "/");
                 displayRoot = $"nfs://{nfsHost}{nfsExport}{nfsPath}";
+                (totalSize, freeSize) = await TryGetNfsVolumeSpaceAsync(nfsClient);
                 break;
             }
 
@@ -197,25 +261,36 @@ static class Program
                 return 1;
         }
 
-        // Derive a default volume label from the provider name when none supplied
+        // ── Derive defaults ───────────────────────────────────────────────────
         string resolvedLabel = label ?? provider.ToUpperInvariant() switch
         {
-            "MEMORY"   => "OwlMount (Memory)",
-            "KUBO-MFS" => "OwlMount (MFS)",
-            "KUBO-IPFS"=> "OwlMount (IPFS)",
-            "KUBO-IPNS"=> "OwlMount (IPNS)",
-            "S3"       => "OwlMount (S3)",
-            "NFS"      => "OwlMount (NFS)",
-            _          => "OwlMount",
+            "MEMORY"    => "OwlMount (Memory)",
+            "ARCHIVE"   => "OwlMount (Archive)",
+            "LOCAL"     => "OwlMount (Local)",
+            "KUBO-MFS"  => "OwlMount (MFS)",
+            "KUBO-IPFS" => "OwlMount (IPFS)",
+            "KUBO-IPNS" => "OwlMount (IPNS)",
+            "S3"        => "OwlMount (S3)",
+            "NFS"       => "OwlMount (NFS)",
+            _           => "OwlMount",
         };
 
         string driveLetter = letter.TrimEnd(':').ToUpperInvariant();
         string mountPoint  = driveLetter + ":";
 
-        Console.WriteLine($"OwlMount — provider: {provider}");
+        // ProjFS is always read-only; ensure the flag reflects reality
+        bool isReadOnly = forceReadOnly || root is not IModifiableFolder || backend == "projfs";
+
+        Console.WriteLine($"OwlMount — provider: {provider}  backend: {backend}");
         Console.WriteLine($"  Root   : {displayRoot}");
         Console.WriteLine($"  Label  : {resolvedLabel}");
+        Console.WriteLine($"  Mode   : {(isReadOnly ? "read-only" : "read-write")}");
         Console.WriteLine($"  Mount  : {mountPoint}\\");
+        if (totalSize.HasValue)
+        {
+            Console.WriteLine($"  Size   : {FormatBytes(totalSize.Value)} total" +
+                (freeSize.HasValue ? $", {FormatBytes(freeSize.Value)} free" : string.Empty));
+        }
         Console.WriteLine();
 
         // ── Build the VFS components ──────────────────────────────────────────
@@ -223,57 +298,48 @@ static class Program
         var sizeProviders = new SizeProviderRegistry();
         var blockCache    = new BlockCache(providerId: $"{provider}_{root.Id}");
 
-        var projFsProvider = new OwlMountProvider(root, blockCache, rangeReaders, sizeProviders);
+        // CTS shared by CancelKeyPress and backend.Stopped so either path exits cleanly.
+        var cts = new CancellationTokenSource();
 
-        // ── Prepare the ProjFS virtualization root directory ──────────────────
-        string virtRoot = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "OwlMount", "VirtRoot", driveLetter);
-
-        // Start fresh — delete any leftover placeholder tree from a prior run.
-        try { Directory.Delete(virtRoot, recursive: true); } catch { /* best-effort */ }
-        Directory.CreateDirectory(virtRoot);
-
-        // ── Start ProjFS virtualization ───────────────────────────────────────
-        var vi = new VirtualizationInstance(
-            virtRoot,
-            poolThreadCount:          0,
-            concurrentThreadCount:    0,
-            enableNegativePathCache:  false,
-            notificationMappings:     Array.Empty<NotificationMapping>());
-
-        projFsProvider.Instance = vi;
-
-        HResult markResult = VirtualizationInstance.MarkDirectoryAsVirtualizationRoot(virtRoot, vi.VirtualizationInstanceId);
-        if (markResult != HResult.Ok)
+        // ── Create the backend ────────────────────────────────────────────────
+        IOwlMountBackend vfsBackend;
+        if (backend == "projfs")
         {
-            Console.Error.WriteLine($"Failed to mark virtualization root (HResult {markResult}).");
-            Console.Error.WriteLine(
-                "Ensure the 'Windows Projected File System' optional feature is enabled:");
-            Console.Error.WriteLine(
-                "  Enable-WindowsOptionalFeature -Online -FeatureName Client-ProjFS -NoRestart");
+            if (!OperatingSystem.IsWindowsVersionAtLeast(10, 0, 17763))
+            {
+                Console.Error.WriteLine(
+                    "Error: ProjFS backend requires Windows 10 version 1803 (build 17763) or later.");
+                return 1;
+            }
+#pragma warning disable CA1416 // resolved by the version check above
+            vfsBackend = new ProjFsBackend(root, blockCache, rangeReaders, sizeProviders);
+#pragma warning restore CA1416
+        }
+        else
+        {
+            vfsBackend = new WinFspBackend(
+                root, blockCache, rangeReaders, sizeProviders,
+                readOnly:  isReadOnly,
+                totalSize: totalSize,
+                freeSize:  freeSize);
+        }
+
+        // DispatcherStopped (WinFsp) or equivalent fires when the drive is ejected externally.
+        vfsBackend.Stopped += (_, _) =>
+        {
+            Console.WriteLine("\nDrive unmounted. Exiting…");
+            DeletePidFile(letter);
+            cts.Cancel();
+        };
+
+        if (!vfsBackend.Start(mountPoint, resolvedLabel))
+        {
+            vfsBackend.Dispose();
             return 1;
         }
 
-        HResult startResult = vi.StartVirtualizing(projFsProvider);
-        if (startResult != HResult.Ok)
+        try
         {
-            Console.Error.WriteLine($"Failed to start ProjFS virtualization (HResult {startResult}).");
-            return 1;
-        }
-
-        // ── Map the virtualization root to the requested drive letter ─────────
-        if (!DefineDosDevice(0, mountPoint, virtRoot))
-        {
-            int err = Marshal.GetLastWin32Error();
-            vi.StopVirtualizing();
-            Console.Error.WriteLine(
-                $"Failed to map drive letter {mountPoint} (Win32 error {err}).");
-            Console.Error.WriteLine(
-                "Ensure the drive letter is not already in use.");
-            return 1;
-        }
-
         // ── Write PID file so 'owlmount unmount' can signal this process ──────
         string pidFile = GetPidFilePath(letter);
         Directory.CreateDirectory(Path.GetDirectoryName(pidFile)!);
@@ -284,13 +350,12 @@ static class Program
         Console.WriteLine($"Unmount with: owlmount unmount --letter {driveLetter}");
         Console.WriteLine("Or press Ctrl+C.");
 
-        // ── CTS shared between Ctrl+C and explicit unmount ────────────────────
-        var cts = new CancellationTokenSource();
-
         Console.CancelKeyPress += (_, e) =>
         {
             e.Cancel = true;
             Console.WriteLine("\nUnmounting…");
+            vfsBackend.Stop();
+            DeletePidFile(letter);
             cts.Cancel();
         };
 
@@ -299,17 +364,11 @@ static class Program
             await Task.Delay(Timeout.Infinite, cts.Token);
         }
         catch (OperationCanceledException) { /* expected */ }
-
-        // ── Cleanup ───────────────────────────────────────────────────────────
-        if (!DefineDosDevice(DDD_REMOVE_DEFINITION, mountPoint, null))
-            Console.Error.WriteLine(
-                $"Warning: failed to remove drive letter {mountPoint} (Win32 error {Marshal.GetLastWin32Error()}).");
-        vi.StopVirtualizing();
-        DeletePidFile(letter);
-
-        // Best-effort cleanup of the virtualization root directory.
-        try { Directory.Delete(virtRoot, recursive: true); }
-        catch (Exception ex) { Console.Error.WriteLine($"Warning: could not delete virtualization root '{virtRoot}': {ex.Message}"); }
+        }
+        finally
+        {
+            vfsBackend.Dispose();
+        }
 
         Console.WriteLine("Done.");
         return 0;
@@ -322,7 +381,7 @@ static class Program
         string? letter = null;
         for (int i = 0; i < args.Length - 1; i++)
         {
-            if (args[i].ToLowerInvariant() == "--letter")
+            if (args[i].Equals("--letter", StringComparison.InvariantCultureIgnoreCase))
                 letter = args[++i];
         }
 
@@ -348,30 +407,26 @@ static class Program
             return 1;
         }
 
-        // Verify the process is still alive before trying to signal it.
         try
         {
             var proc = Process.GetProcessById(pid);
             if (proc.HasExited)
             {
-                Console.Error.WriteLine(
-                    $"Mount process (PID {pid}) has already exited.");
+                Console.Error.WriteLine($"Mount process (PID {pid}) has already exited.");
                 File.Delete(pidFile);
                 return 1;
             }
         }
         catch (ArgumentException)
         {
-            Console.Error.WriteLine(
-                $"Mount process (PID {pid}) is no longer running.");
+            Console.Error.WriteLine($"Mount process (PID {pid}) is no longer running.");
             File.Delete(pidFile);
             return 1;
         }
 
         if (!SendCtrlC(pid))
         {
-            Console.Error.WriteLine(
-                $"Failed to send unmount signal to process {pid}.");
+            Console.Error.WriteLine($"Failed to send unmount signal to process {pid}.");
             return 1;
         }
 
@@ -423,7 +478,6 @@ static class Program
             }
             else
             {
-                // Stale entry — clean up silently.
                 try { File.Delete(pidFile); } catch { /* best-effort */ }
             }
         }
@@ -446,11 +500,17 @@ static class Program
         Console.WriteLine("  owlmount list");
         Console.WriteLine();
         Console.WriteLine("Mount options (all providers):");
-        Console.WriteLine("  --provider   memory | kubo-mfs | kubo-ipfs | kubo-ipns | s3 | nfs  (default: memory)");
+        Console.WriteLine(
+            "  --provider   memory | archive | local | kubo-mfs | kubo-ipfs | kubo-ipns | s3 | nfs  (default: memory)");
+        Console.WriteLine(
+            "  --backend    winfsp | projfs  (default: winfsp)");
         Console.WriteLine("  --letter     Drive letter to mount on (default: M)");
         Console.WriteLine("  --label      Volume label shown in Explorer (default: auto)");
+        Console.WriteLine("  --read-only  Force the mounted filesystem to open as read-only");
         Console.WriteLine();
         Console.WriteLine("  memory       (no extra flags; drive starts empty)");
+        Console.WriteLine("  archive      --archive-file <local-archive-path>");
+        Console.WriteLine("  local        --path <local-directory-path>");
         Console.WriteLine("  kubo-mfs     --path <mfs-path>  [--api-url http://127.0.0.1:5001]");
         Console.WriteLine("  kubo-ipfs    --cid <CID>        [--api-url http://127.0.0.1:5001]");
         Console.WriteLine("  kubo-ipns    --ipns <address>   [--api-url http://127.0.0.1:5001]");
@@ -462,6 +522,10 @@ static class Program
         Console.WriteLine();
         Console.WriteLine("Examples:");
         Console.WriteLine("  owlmount mount --provider memory --letter R");
+        Console.WriteLine("  owlmount mount --provider memory --letter R --read-only");
+        Console.WriteLine("  owlmount mount --provider memory --letter R --backend projfs");
+        Console.WriteLine("  owlmount mount --provider archive --archive-file C:\\data\\backup.zip --letter A");
+        Console.WriteLine("  owlmount mount --provider local --path C:\\data --letter D");
         Console.WriteLine("  owlmount mount --provider kubo-mfs --path /my/dir --letter K --label IPFS");
         Console.WriteLine("  owlmount mount --provider kubo-ipfs --cid bafybei... --letter I");
         Console.WriteLine("  owlmount mount --provider s3 --bucket my-bucket --prefix data/ --letter S");
@@ -486,26 +550,110 @@ static class Program
         try { File.Delete(GetPidFilePath(letter)); } catch { /* best-effort */ }
     }
 
-    // ── Win32: drive letter mapping ───────────────────────────────────────────
+    // ── Volume size helpers ───────────────────────────────────────────────────
 
-    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
-    static extern bool DefineDosDevice(uint dwFlags, string lpDeviceName, string? lpTargetPath);
+    static (ulong? TotalSize, ulong? FreeSize) GetMemoryVolumeSpace()
+    {
+        var gcInfo = GC.GetGCMemoryInfo();
+        if (gcInfo.TotalAvailableMemoryBytes <= 0)
+            return (null, null);
 
-    private const uint DDD_REMOVE_DEFINITION = 0x00000002u;
+        ulong total = (ulong)gcInfo.TotalAvailableMemoryBytes;
+        ulong used  = (ulong)Math.Max(GC.GetTotalMemory(forceFullCollection: false), 0L);
+        ulong free  = used >= total ? 0 : total - used;
+        return (total, free);
+    }
+
+    static ulong? TryGetArchiveVolumeSize(string archivePath)
+    {
+        try
+        {
+            string? root = Path.GetPathRoot(Path.GetFullPath(archivePath));
+            if (string.IsNullOrWhiteSpace(root)) return null;
+            long available = new DriveInfo(root).AvailableFreeSpace;
+            return available > 0 ? (ulong)available : null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    static async Task<(ulong? TotalSize, ulong? FreeSize)> TryGetKuboRepositorySpaceAsync(IpfsClient client)
+    {
+        try
+        {
+            var repo  = await client.Stats.RepositoryAsync(CancellationToken.None);
+            ulong total = repo.StorageMax;
+            ulong used  = repo.RepoSize;
+            ulong free  = used >= total ? 0 : total - used;
+            return total == 0 ? (null, null) : (total, free);
+        }
+        catch
+        {
+            return (null, null);
+        }
+    }
+
+    static async Task<(ulong? TotalSize, ulong? FreeSize)> TryGetDagVolumeSpaceAsync(
+        IpfsClient client, string path)
+    {
+        try
+        {
+            var stats = await client.Dag.StatAsync(path, progress: null, CancellationToken.None);
+            return stats.TotalSize is > 0 ? (stats.TotalSize.Value, 0) : (null, null);
+        }
+        catch
+        {
+            return (null, null);
+        }
+    }
+
+    static async Task<(ulong? TotalSize, ulong? FreeSize)> TryGetNfsVolumeSpaceAsync(NfsClient client)
+    {
+        try
+        {
+            var stats = await client.FsStatAsync(CancellationToken.None);
+            return (stats.TotalBytes, stats.AvailBytes);
+        }
+        catch
+        {
+            return (null, null);
+        }
+    }
+
+    static string FormatBytes(ulong value)
+    {
+        string[] units = ["B", "KiB", "MiB", "GiB", "TiB", "PiB"];
+        double size = value;
+        int unit = 0;
+        while (size >= 1024 && unit < units.Length - 1)
+        {
+            size /= 1024;
+            unit++;
+        }
+
+        return $"{size:0.##} {units[unit]}";
+    }
 
     // ── Win32 helpers for cross-process Ctrl+C ────────────────────────────────
 
-    [DllImport("kernel32", SetLastError = true)]
-    static extern bool FreeConsole();
+    [LibraryImport("kernel32", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool FreeConsole();
 
-    [DllImport("kernel32", SetLastError = true)]
-    static extern bool AttachConsole(int dwProcessId);
+    [LibraryImport("kernel32", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool AttachConsole(int dwProcessId);
 
-    [DllImport("kernel32", SetLastError = true)]
-    static extern bool GenerateConsoleCtrlEvent(uint dwCtrlEvent, uint dwProcessGroupId);
+    [LibraryImport("kernel32", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool GenerateConsoleCtrlEvent(uint dwCtrlEvent, uint dwProcessGroupId);
 
-    [DllImport("kernel32", SetLastError = true)]
-    static extern bool SetConsoleCtrlHandler(nint HandlerRoutine, bool Add);
+    [LibraryImport("kernel32", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool SetConsoleCtrlHandler(
+        nint handlerRoutine, [MarshalAs(UnmanagedType.Bool)] bool add);
 
     private const uint CtrlCEvent = 0;
 
@@ -516,23 +664,14 @@ static class Program
     /// </summary>
     static bool SendCtrlC(int pid)
     {
-        // Detach from our own console so we can attach to the target's.
         FreeConsole();
+        if (!AttachConsole(pid)) return false;
 
-        if (!AttachConsole(pid))
-            return false;
-
-        // Ignore CTRL+C in this process so we don't terminate ourselves.
         SetConsoleCtrlHandler(nint.Zero, true);
-
         bool ok = GenerateConsoleCtrlEvent(CtrlCEvent, 0);
-
-        // Brief pause so the mount process can start handling the signal.
         Thread.Sleep(500);
 
         FreeConsole();
-
-        // Restore default CTRL+C behaviour for this process.
         SetConsoleCtrlHandler(nint.Zero, false);
 
         return ok;

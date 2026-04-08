@@ -31,6 +31,23 @@ public sealed class DirectoryCache
     public void Invalidate(string normalizedPath) =>
         _cache.TryRemove(normalizedPath, out _);
 
+    /// <summary>Removes cached listings for <paramref name="normalizedPath"/> and its descendants.</summary>
+    public void InvalidateSubtree(string normalizedPath)
+    {
+        string prefix = string.IsNullOrEmpty(normalizedPath)
+            ? string.Empty
+            : normalizedPath + "/";
+
+        foreach (string key in _cache.Keys)
+        {
+            if (key.Equals(normalizedPath, StringComparison.OrdinalIgnoreCase) ||
+                (!string.IsNullOrEmpty(prefix) && key.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)))
+            {
+                _cache.TryRemove(key, out _);
+            }
+        }
+    }
+
     private sealed class CacheEntry(IReadOnlyList<DirectoryEntry> items)
     {
         public IReadOnlyList<DirectoryEntry> Items { get; } = items;
@@ -45,4 +62,5 @@ public sealed record DirectoryEntry(
     bool IsDirectory,
     long Size,
     DateTimeOffset CreatedAt,
+    DateTimeOffset LastAccessed,
     DateTimeOffset LastModified);
