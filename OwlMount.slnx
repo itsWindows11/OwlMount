@@ -1,4 +1,7 @@
 <Solution>
+  <Folder Name="/Solution Items/">
+    <File Path="README.md" />
+  </Folder>
   <Folder Name="/src/">
     <Project Path="src/OwlMount.Core/OwlMount.Core.csproj" />
     <Project Path="src/OwlMount.WinFspHost/OwlMount.WinFspHost.csproj" />

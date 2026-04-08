@@ -118,6 +118,29 @@ public sealed class BlockCacheTests : IDisposable
         Assert.Equal(content, buffer);
     }
 
+    [Fact]
+    public async Task Invalidate_RemovesCachedBlocksSoNextReadRefetches()
+    {
+        byte[] original = MakeContent(300);
+        byte[] updated = MakeContent(300).Reverse().ToArray();
+        var file = new TestFile("f7", original);
+        var cache = new BlockCache("test", blockSize: 512, cacheDir: _tempDir);
+        var firstReader = new CountingRangeReader(original);
+        var secondReader = new CountingRangeReader(updated);
+
+        byte[] firstBuffer = new byte[300];
+        await cache.ReadAsync(file, firstReader, offset: 0, firstBuffer.AsMemory());
+
+        cache.Invalidate(file.Id);
+
+        byte[] secondBuffer = new byte[300];
+        await cache.ReadAsync(file, secondReader, offset: 0, secondBuffer.AsMemory());
+
+        Assert.Equal(1, firstReader.CallCount);
+        Assert.Equal(1, secondReader.CallCount);
+        Assert.Equal(updated, secondBuffer);
+    }
+
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     private static byte[] MakeContent(int length) =>

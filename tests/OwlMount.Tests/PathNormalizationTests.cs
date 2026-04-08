@@ -71,4 +71,38 @@ public sealed class PathNormalizationTests
 
         Assert.Null(index.TryGet("docs/doc.pdf"));
     }
+
+    [Fact]
+    public void PathIndex_RemoveSubtree_DeletesEntryAndDescendantsOnly()
+    {
+        var index = new PathIndex();
+        var folderEntry = new OwlMount.Core.Abstractions.PathIndexEntry
+        {
+            Id = "folder",
+            Name = "docs",
+            IsFile = false,
+        };
+        var childEntry = new OwlMount.Core.Abstractions.PathIndexEntry
+        {
+            Id = "child",
+            Name = "doc.pdf",
+            IsFile = true,
+        };
+        var siblingEntry = new OwlMount.Core.Abstractions.PathIndexEntry
+        {
+            Id = "sibling",
+            Name = "other.txt",
+            IsFile = true,
+        };
+
+        index.AddOrUpdate("docs", folderEntry);
+        index.AddOrUpdate("docs/archive/doc.pdf", childEntry);
+        index.AddOrUpdate("other.txt", siblingEntry);
+
+        index.RemoveSubtree("docs");
+
+        Assert.Null(index.TryGet("docs"));
+        Assert.Null(index.TryGet("docs/archive/doc.pdf"));
+        Assert.Same(siblingEntry, index.TryGet("other.txt"));
+    }
 }

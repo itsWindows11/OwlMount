@@ -84,6 +84,12 @@ Pressing **Ctrl+C**, running `owlmount unmount --letter <X>` from another termin
 | `s3` | `--bucket` `[--prefix]` `[--access-key]` `[--secret-key]` `[--region]` `[--endpoint]` | Amazon S3 bucket/prefix |
 | `nfs` | `--host <ip>` `--export </path>` `[--nfs-path <path>]` | NFS v3 share |
 
+> Pass `--read-only` with any provider to suppress write support for that mount.
+>
+> Live folder refresh is enabled only for providers and folders that successfully expose `IFolderWatcher`; unsupported providers continue to rely on cache TTL and local invalidation.
+>
+> The `archive` provider is mounted read-only and reports volume capacity using the current free space on the local disk that stores the archive file.
+>
 > **OneDrive** is supported as a code-level provider (`OneDriveFolder` / `OneDriveFile` from `OwlCore.Storage.OneDrive`) but requires a pre-authenticated `GraphServiceClient` from MSAL — see the *Adding a custom provider* section.
 
 ### Example — empty in-memory filesystem as `R:` (WinFsp, read-write)
@@ -103,6 +109,20 @@ owlmount mount --provider memory --letter R --backend projfs
 ```bat
 owlmount mount --provider archive --archive-file C:\data\backup.zip --letter A
 ```
+
+### Example — same in-memory filesystem forced read-only
+
+```bat
+owlmount mount --provider memory --letter R --label "RAM Drive" --read-only
+```
+
+### Example — archive file as `A:`
+
+```bat
+owlmount mount --provider archive --archive-file C:\data\backup.zip --letter A
+```
+
+Mounts the contents of a local archive file as a read-only drive.
 
 ### Example — Kubo MFS as `K:`
 
@@ -128,7 +148,7 @@ owlmount mount --provider nfs --host 192.168.1.10 --export /srv/share --letter N
 ## Architecture
 
 ```
-OwlMount.sln
+OwlMount.slnx
 ├── src/
 │   ├── OwlMount.Core/                Cross-platform .NET 10 library
 │   │   ├── Abstractions/             IRangeReader, ISizeProvider, PathIndexEntry

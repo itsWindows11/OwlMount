@@ -8,12 +8,12 @@ using OwlCore.Kubo;
 using OwlCore.Storage;
 using OwlCore.Storage.AmazonS3;
 using OwlCore.Storage.Memory;
+using OwlCore.Storage.NfsSharp;
 using OwlCore.Storage.SharpCompress;
 using OwlCore.Storage.System.IO;
 using OwlMount.Core.Cache;
 using OwlMount.Core.Registry;
 using OwlMount.WinFspHost;
-using OwlMount.WinFspHost.Providers.Nfs;
 
 [SupportedOSPlatform("windows")]
 static partial class Program
