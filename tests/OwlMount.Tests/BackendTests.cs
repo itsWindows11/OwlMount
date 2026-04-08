@@ -187,7 +187,6 @@ file sealed class ReadOnlyFolderStub(string id, string name) : IFolder
 
     private static async IAsyncEnumerable<T> AsyncEnumerableEmpty<T>()
     {
-        await Task.CompletedTask;
         yield break;
     }
 }

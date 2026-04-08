@@ -104,8 +104,9 @@ static partial class Program
         }
 
         // ── Resolve the root IFolder ──────────────────────────────────────────
-        IFolder root;
-        string  displayRoot;
+        IFolder      root;
+        string       displayRoot;
+        IDisposable? extraDisposable = null; // tracks any provider-owned resource (e.g. S3 HttpClientFactory)
 
         switch (provider.ToLowerInvariant())
         {
@@ -225,7 +226,9 @@ static partial class Program
                     s3Config.RegionEndpoint = Amazon.RegionEndpoint.GetBySystemName(s3Region);
                 if (!string.IsNullOrWhiteSpace(s3Endpoint))
                     s3Config.ServiceURL = s3Endpoint;
-                s3Config.HttpClientFactory = new TlsHttpClientFactory();
+                var tlsFactory = new TlsHttpClientFactory();
+                s3Config.HttpClientFactory = tlsFactory;
+                extraDisposable = tlsFactory;
 
                 IAmazonS3 s3Client = (s3Key, s3Secret) switch
                 {
@@ -370,6 +373,7 @@ static partial class Program
         finally
         {
             vfsBackend.Dispose();
+            extraDisposable?.Dispose();
         }
 
         Console.WriteLine("Done.");
@@ -687,8 +691,10 @@ static partial class Program
     /// <see cref="SocketsHttpHandler"/> with TLS 1.2 and 1.3 explicitly enabled.
     /// This prevents the <c>HandshakeFailure</c> TLS alert that can occur with the
     /// default AWSSDK v4 HTTP pipeline against standard S3 and S3-compatible endpoints.
+    /// The single <see cref="HttpClient"/> instance is intentionally kept alive for the
+    /// application lifetime; it is disposed when this factory is disposed.
     /// </summary>
-    private sealed class TlsHttpClientFactory : HttpClientFactory
+    private sealed class TlsHttpClientFactory : HttpClientFactory, IDisposable
     {
         private readonly HttpClient _client = new(new SocketsHttpHandler
         {
@@ -705,5 +711,7 @@ static partial class Program
         public override bool UseSDKHttpClientCaching(IClientConfig config)    => true;
         public override bool DisposeHttpClientsAfterUse(IClientConfig config) => false;
         public override string GetConfigUniqueString(IClientConfig config)    => "owlmount-tls";
+
+        public void Dispose() => _client.Dispose();
     }
 }
