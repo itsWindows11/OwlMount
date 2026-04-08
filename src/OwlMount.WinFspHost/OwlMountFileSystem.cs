@@ -31,13 +31,15 @@ public sealed class OwlMountFileSystem : FileSystemBase
     private readonly SizeProviderRegistry _sizeProviders;
     private readonly string _volumeLabel;
     private readonly bool _isReadOnly;
+    private readonly ulong _totalSize;
+    private readonly ulong _freeSize;
     private readonly ConcurrentDictionary<string, WatchedFolder> _watchedFolders =
         new(StringComparer.OrdinalIgnoreCase);
     private readonly object _notifySync = new();
 
     private FileSystemHost? _host;
 
-    private const ulong NominalVolumeSize = 1UL << 40;
+    private const ulong DefaultVolumeSize = 1UL << 40;
     private const uint AttrReadOnly = 0x00000001u;
     private const uint AttrDirectory = 0x00000010u;
     private const uint AttrArchive = 0x00000020u;
@@ -51,6 +53,8 @@ public sealed class OwlMountFileSystem : FileSystemBase
         RangeReaderRegistry rangeReaders,
         SizeProviderRegistry? sizeProviders = null,
         bool readOnly = false,
+        ulong? totalSize = null,
+        ulong? freeSize = null,
         string? volumeLabel = null,
         Action? onDispatcherStopped = null)
     {
@@ -63,6 +67,8 @@ public sealed class OwlMountFileSystem : FileSystemBase
         _volumeLabel = string.IsNullOrWhiteSpace(volumeLabel) ? "OwlMount" : volumeLabel;
         _onDispatcherStopped = onDispatcherStopped;
         _isReadOnly = readOnly || root is not IModifiableFolder;
+        _totalSize = totalSize.GetValueOrDefault(DefaultVolumeSize);
+        _freeSize = _isReadOnly ? 0 : Math.Min(freeSize ?? _totalSize, _totalSize);
     }
 
     // ── Lifecycle ─────────────────────────────────────────────────────────────
@@ -105,8 +111,8 @@ public sealed class OwlMountFileSystem : FileSystemBase
     public override int GetVolumeInfo(out VolumeInfo volumeInfo)
     {
         volumeInfo = default;
-        volumeInfo.TotalSize = NominalVolumeSize;
-        volumeInfo.FreeSize = _isReadOnly ? 0 : NominalVolumeSize;
+        volumeInfo.TotalSize = _totalSize;
+        volumeInfo.FreeSize = _freeSize;
         volumeInfo.SetVolumeLabel(_volumeLabel);
         return STATUS_SUCCESS;
     }

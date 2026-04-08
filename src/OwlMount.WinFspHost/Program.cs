@@ -15,7 +15,7 @@ using OwlMount.WinFspHost;
 using OwlMount.WinFspHost.Providers.Nfs;
 
 [SupportedOSPlatform("windows")]
-static class Program
+static partial class Program
 {
     static async Task<int> Main(string[] args)
     {
@@ -42,11 +42,13 @@ static class Program
 
     static async Task<int> RunMountAsync(string[] args)
     {
-        string  provider     = "memory";
-        string  letter       = "M";
-        string? label        = null;
-        string? path         = null;
+        string  provider      = "memory";
+        string  letter        = "M";
+        string? label         = null;
+        string? path          = null;
         bool    forceReadOnly = false;
+        ulong? totalSize      = null;
+        ulong? freeSize       = null;
         // S3
         string? s3Bucket   = null;
         string? s3Prefix   = null;
@@ -98,8 +100,9 @@ static class Program
         {
             // ── memory ────────────────────────────────────────────────────────
             case "memory":
-                root        = new MemoryFolder(id: "memory-root", name: "memory-root");
+                root = new MemoryFolder(id: "memory-root", name: "memory-root");
                 displayRoot = "(in-memory, starts empty)";
+                (totalSize, freeSize) = GetMemoryVolumeSpace();
                 break;
 
             // ── kubo-mfs ──────────────────────────────────────────────────────
@@ -109,6 +112,7 @@ static class Program
                 var client = new IpfsClient(apiUrl ?? "http://127.0.0.1:5001");
                 root        = new MfsFolder(mfsPath, client);
                 displayRoot = $"kubo MFS {mfsPath} @ {client.ApiUri}";
+                (totalSize, freeSize) = await TryGetKuboRepositorySpaceAsync(client);
                 break;
             }
 
@@ -120,9 +124,11 @@ static class Program
                     Console.Error.WriteLine("Error: --cid is required for provider 'kubo-ipfs'.");
                     return 1;
                 }
+
                 var client = new IpfsClient(apiUrl ?? "http://127.0.0.1:5001");
                 root        = new IpfsFolder(cid, client);
                 displayRoot = $"ipfs://{cid}";
+                (totalSize, freeSize) = await TryGetDagVolumeSpaceAsync(client, $"/ipfs/{cid}");
                 break;
             }
 
@@ -134,9 +140,11 @@ static class Program
                     Console.Error.WriteLine("Error: --ipns is required for provider 'kubo-ipns'.");
                     return 1;
                 }
+
                 var client = new IpfsClient(apiUrl ?? "http://127.0.0.1:5001");
                 root        = new IpnsFolder(ipnsAddr, client);
                 displayRoot = $"ipns://{ipnsAddr}";
+                (totalSize, freeSize) = await TryGetKuboRepositorySpaceAsync(client);
                 break;
             }
 
@@ -170,10 +178,10 @@ static class Program
                 IAmazonS3 s3Client = (s3Key, s3Secret) switch
                 {
                     ({ } k, { } s) => new AmazonS3Client(k, s, s3Config),
-                    _              => new AmazonS3Client(s3Config), // use ambient credentials
+                    _ => new AmazonS3Client(s3Config),
                 };
 
-                root        = new S3Folder(s3Client, s3Bucket, s3Prefix ?? string.Empty);
+                root = new S3Folder(s3Client, s3Bucket, s3Prefix ?? string.Empty);
                 displayRoot = $"s3://{s3Bucket}/{s3Prefix ?? string.Empty}";
                 break;
             }
@@ -192,6 +200,7 @@ static class Program
                 await nfsClient.ConnectAsync();
                 root        = await NfsFolder.GetFromNfsPathAsync(nfsClient, nfsPath ?? "/");
                 displayRoot = $"nfs://{nfsHost}{nfsExport}{nfsPath}";
+                (totalSize, freeSize) = await TryGetNfsVolumeSpaceAsync(nfsClient);
                 break;
             }
 
@@ -205,13 +214,13 @@ static class Program
         // Derive a default volume label from the provider name when none supplied
         string resolvedLabel = label ?? provider.ToUpperInvariant() switch
         {
-            "MEMORY"   => "OwlMount (Memory)",
-            "KUBO-MFS" => "OwlMount (MFS)",
-            "KUBO-IPFS"=> "OwlMount (IPFS)",
-            "KUBO-IPNS"=> "OwlMount (IPNS)",
-            "S3"       => "OwlMount (S3)",
-            "NFS"      => "OwlMount (NFS)",
-            _          => "OwlMount",
+            "MEMORY"    => "OwlMount (Memory)",
+            "KUBO-MFS"  => "OwlMount (MFS)",
+            "KUBO-IPFS" => "OwlMount (IPFS)",
+            "KUBO-IPNS" => "OwlMount (IPNS)",
+            "S3"        => "OwlMount (S3)",
+            "NFS"       => "OwlMount (NFS)",
+            _           => "OwlMount",
         };
 
         bool isReadOnly = forceReadOnly || root is not IModifiableFolder;
@@ -220,6 +229,11 @@ static class Program
         Console.WriteLine($"  Root   : {displayRoot}");
         Console.WriteLine($"  Label  : {resolvedLabel}");
         Console.WriteLine($"  Mode   : {(isReadOnly ? "read-only" : "read-write")}");
+        if (totalSize.HasValue)
+        {
+            Console.WriteLine($"  Size   : {FormatBytes(totalSize.Value)} total" +
+                (freeSize.HasValue ? $", {FormatBytes(freeSize.Value)} free" : string.Empty));
+        }
 
         // ── Build the VFS components ──────────────────────────────────────────
         var rangeReaders  = new RangeReaderRegistry();
@@ -232,6 +246,8 @@ static class Program
         var fs = new OwlMountFileSystem(
             root, blockCache, rangeReaders, sizeProviders,
             readOnly: forceReadOnly,
+            totalSize: totalSize,
+            freeSize: freeSize,
             volumeLabel: resolvedLabel,
             onDispatcherStopped: () =>
             {
@@ -477,19 +493,91 @@ static class Program
         try { File.Delete(GetPidFilePath(letter)); } catch { /* best-effort */ }
     }
 
+    static (ulong? TotalSize, ulong? FreeSize) GetMemoryVolumeSpace()
+    {
+        var gcInfo = GC.GetGCMemoryInfo();
+        if (gcInfo.TotalAvailableMemoryBytes <= 0)
+            return (null, null);
+
+        ulong total = (ulong)gcInfo.TotalAvailableMemoryBytes;
+        ulong used = (ulong)Math.Max(GC.GetTotalMemory(forceFullCollection: false), 0L);
+        ulong free = used >= total ? 0 : total - used;
+        return (total, free);
+    }
+
+    static async Task<(ulong? TotalSize, ulong? FreeSize)> TryGetKuboRepositorySpaceAsync(IpfsClient client)
+    {
+        try
+        {
+            var repository = await client.Stats.RepositoryAsync(CancellationToken.None);
+            ulong total = repository.StorageMax;
+            ulong used = repository.RepoSize;
+            ulong free = used >= total ? 0 : total - used;
+            return total == 0 ? (null, null) : (total, free);
+        }
+        catch
+        {
+            return (null, null);
+        }
+    }
+
+    static async Task<(ulong? TotalSize, ulong? FreeSize)> TryGetDagVolumeSpaceAsync(IpfsClient client, string path)
+    {
+        try
+        {
+            var stats = await client.Dag.StatAsync(path, progress: null, CancellationToken.None);
+            return stats.TotalSize is > 0 ? (stats.TotalSize.Value, 0) : (null, null);
+        }
+        catch
+        {
+            return (null, null);
+        }
+    }
+
+    static async Task<(ulong? TotalSize, ulong? FreeSize)> TryGetNfsVolumeSpaceAsync(NfsClient client)
+    {
+        try
+        {
+            var stats = await client.FsStatAsync(CancellationToken.None);
+            return (stats.TotalBytes, stats.AvailBytes);
+        }
+        catch
+        {
+            return (null, null);
+        }
+    }
+
+    static string FormatBytes(ulong value)
+    {
+        string[] units = ["B", "KiB", "MiB", "GiB", "TiB", "PiB"];
+        double size = value;
+        int unit = 0;
+        while (size >= 1024 && unit < units.Length - 1)
+        {
+            size /= 1024;
+            unit++;
+        }
+
+        return $"{size:0.##} {units[unit]}";
+    }
+
     // ── Win32 helpers for cross-process Ctrl+C ────────────────────────────────
 
-    [DllImport("kernel32", SetLastError = true)]
-    static extern bool FreeConsole();
+    [LibraryImport("kernel32", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool FreeConsole();
 
-    [DllImport("kernel32", SetLastError = true)]
-    static extern bool AttachConsole(int dwProcessId);
+    [LibraryImport("kernel32", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool AttachConsole(int dwProcessId);
 
-    [DllImport("kernel32", SetLastError = true)]
-    static extern bool GenerateConsoleCtrlEvent(uint dwCtrlEvent, uint dwProcessGroupId);
+    [LibraryImport("kernel32", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool GenerateConsoleCtrlEvent(uint dwCtrlEvent, uint dwProcessGroupId);
 
-    [DllImport("kernel32", SetLastError = true)]
-    static extern bool SetConsoleCtrlHandler(nint HandlerRoutine, bool Add);
+    [LibraryImport("kernel32", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool SetConsoleCtrlHandler(nint handlerRoutine, [MarshalAs(UnmanagedType.Bool)] bool add);
 
     private const uint CtrlCEvent = 0;
 
