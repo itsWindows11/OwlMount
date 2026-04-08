@@ -170,7 +170,7 @@ public sealed partial class ProjFsBackend : IOwlMountBackend
     /// <inheritdoc/>
     public void Dispose() => Stop();
 
-    [LibraryImport("kernel32", SetLastError = true, StringMarshalling = StringMarshalling.Utf16)]
+    [LibraryImport("kernel32", EntryPoint = "DefineDosDeviceW", SetLastError = true, StringMarshalling = StringMarshalling.Utf16)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static partial bool DefineDosDevice(
         uint dwFlags, string lpDeviceName, string? lpTargetPath);
