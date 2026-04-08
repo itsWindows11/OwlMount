@@ -690,15 +690,7 @@ public sealed class OwlMountFileSystem : FileSystemBase
         if (_isReadOnly)
             return STATUS_MEDIA_WRITE_PROTECTED;
 
-        string path = fileNode switch
-        {
-            FileContext fc => fc.NormalizedPath,
-            FolderContext dc => dc.NormalizedPath,
-            _ => string.Empty,
-        };
-
-        LogWriteFailure("set-security", path, new NotSupportedException("Setting security descriptors is not supported."), STATUS_ACCESS_DENIED);
-        return STATUS_ACCESS_DENIED;
+        return STATUS_SUCCESS;
     }
 
     // ── Internal helpers ──────────────────────────────────────────────────────
@@ -946,18 +938,21 @@ public sealed class OwlMountFileSystem : FileSystemBase
             bool isDir = item is IFolder;
             DateTimeOffset? created = GetCreatedAt(item);
             DateTimeOffset? modified = GetLastModifiedAt(item);
-            long size = 0;
 
             string childPath = CombineNormalizedPath(ctx.NormalizedPath, item.Name);
             if (item is IFolder childFolder)
                 EnsureFolderWatcher(childFolder, childPath);
+
+            long? knownSize = item is IFile file
+                ? TryGetFileSize(file, childPath)
+                : null;
 
             _index.AddOrUpdate(childPath, new PathIndexEntry
             {
                 Id = item.Id,
                 Name = item.Name,
                 IsFile = !isDir,
-                Size = isDir ? null : null,
+                Size = knownSize,
                 CreatedAt = created == DateTimeOffset.MinValue ? null : created,
                 LastModifiedAt = modified == DateTimeOffset.MinValue ? null : modified,
                 LastAccessedAt = GetLastAccessedAt(item),
@@ -966,13 +961,32 @@ public sealed class OwlMountFileSystem : FileSystemBase
             result.Add(new DirectoryEntry(
                 item.Name,
                 isDir,
-                size,
+                knownSize ?? 0,
                 created ?? DateTimeOffset.UnixEpoch,
                 modified ?? DateTimeOffset.UnixEpoch));
         }
 
         _dirCache.Set(ctx.NormalizedPath, result);
         return result;
+    }
+
+    private long? TryGetFileSize(IFile file, string? normalizedPath = null)
+    {
+        if (!string.IsNullOrEmpty(normalizedPath) && _index.TryGet(normalizedPath) is { Size: long cachedSize })
+            return cachedSize;
+
+        try
+        {
+            return _sizeProviders
+                .GetProvider(file)
+                .GetSizeAsync(file)
+                .GetAwaiter()
+                .GetResult();
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private PathIndexEntry? ResolveAndIndex(string normalizedPath)
@@ -994,7 +1008,7 @@ public sealed class OwlMountFileSystem : FileSystemBase
         if (child is IFolder folder)
             EnsureFolderWatcher(folder, normalizedPath);
 
-        PathIndexEntry entry = CreateEntry(child);
+        PathIndexEntry entry = CreateEntry(child, child is IFile file ? TryGetFileSize(file, normalizedPath) : null);
         _index.AddOrUpdate(normalizedPath, entry);
         return entry;
     }
