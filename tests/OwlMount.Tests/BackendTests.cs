@@ -1,0 +1,192 @@
+using System.Collections.Generic;
+using System.Runtime.Versioning;
+using System.Threading;
+using OwlCore.Storage;
+using OwlCore.Storage.Memory;
+using OwlMount.Core.Cache;
+using OwlMount.Core.Registry;
+using OwlMount.Core.Windows.Backends;
+
+namespace OwlMount.Tests;
+
+/// <summary>
+/// Unit tests for <see cref="WinFspBackend"/> and <see cref="ProjFsBackend"/>.
+/// Tests that require a specific OS version skip silently on unsupported platforms.
+/// </summary>
+public sealed class BackendTests : IDisposable
+{
+    private readonly string _tempDir = Path.Combine(
+        Path.GetTempPath(), "OwlMountBackendTests_" + Guid.NewGuid().ToString("N"));
+
+    public BackendTests() => Directory.CreateDirectory(_tempDir);
+
+    public void Dispose()
+    {
+        try { Directory.Delete(_tempDir, recursive: true); }
+        catch { /* best-effort */ }
+    }
+
+    // ── OS guards ─────────────────────────────────────────────────────────────
+
+    private static bool IsWindows()    => OperatingSystem.IsWindows();
+    private static bool IsProjFsOs()   => OperatingSystem.IsWindowsVersionAtLeast(10, 0, 17763);
+
+    // ── WinFspBackend tests ───────────────────────────────────────────────────
+
+    [Fact]
+    public void WinFsp_Name_ReturnsWinFsp()
+    {
+        if (!IsWindows()) return;
+        using var backend = MakeWinFsp();
+        Assert.Equal("WinFsp", backend.Name);
+    }
+
+    [Fact]
+    public void WinFsp_IsReadOnly_Default_IsFalse()
+    {
+        if (!IsWindows()) return;
+        using var backend = MakeWinFsp(readOnly: false);
+        Assert.False(backend.IsReadOnly);
+    }
+
+    [Fact]
+    public void WinFsp_IsReadOnly_True_WhenForced()
+    {
+        if (!IsWindows()) return;
+        using var backend = MakeWinFsp(readOnly: true);
+        Assert.True(backend.IsReadOnly);
+    }
+
+    [Fact]
+    public void WinFsp_IsAvailable_DoesNotThrow()
+    {
+        if (!IsWindows()) return;
+        _ = WinFspBackend.IsAvailable();
+    }
+
+    [Fact]
+    public void WinFsp_Dispose_BeforeStart_DoesNotThrow()
+    {
+        if (!IsWindows()) return;
+        MakeWinFsp().Dispose(); // must not throw
+    }
+
+    [Fact]
+    public void WinFsp_Stop_BeforeStart_DoesNotThrow()
+    {
+        if (!IsWindows()) return;
+        using var backend = MakeWinFsp();
+        backend.Stop(); // must not throw
+    }
+
+    // ── ProjFsBackend tests ───────────────────────────────────────────────────
+
+    [Fact]
+    [SupportedOSPlatform("windows10.0.17763.0")]
+    public void ProjFs_Name_ReturnsProjFS()
+    {
+        if (!IsProjFsOs()) return;
+        using var backend = MakeProjFs();
+        Assert.Equal("ProjFS", backend.Name);
+    }
+
+    [Fact]
+    [SupportedOSPlatform("windows10.0.17763.0")]
+    public void ProjFs_IsReadOnly_False_WithModifiableRoot()
+    {
+        if (!IsProjFsOs()) return;
+        using var backend = MakeProjFs(readOnly: false);
+        Assert.False(backend.IsReadOnly);
+    }
+
+    [Fact]
+    [SupportedOSPlatform("windows10.0.17763.0")]
+    public void ProjFs_IsReadOnly_True_WhenForced()
+    {
+        if (!IsProjFsOs()) return;
+        using var backend = MakeProjFs(readOnly: true);
+        Assert.True(backend.IsReadOnly);
+    }
+
+    [Fact]
+    [SupportedOSPlatform("windows10.0.17763.0")]
+    public void ProjFs_IsReadOnly_True_WhenRootIsNotModifiable()
+    {
+        if (!IsProjFsOs()) return;
+        var blockCache   = new BlockCache("backend-test", cacheDir: _tempDir);
+        var rangeReaders = new RangeReaderRegistry();
+        using var backend = new ProjFsBackend(
+            new ReadOnlyFolderStub("root", "root"),
+            blockCache, rangeReaders);
+        Assert.True(backend.IsReadOnly);
+    }
+
+    [Fact]
+    [SupportedOSPlatform("windows10.0.17763.0")]
+    public void ProjFs_IsAvailable_DoesNotThrow()
+    {
+        if (!IsProjFsOs()) return;
+        _ = ProjFsBackend.IsAvailable();
+    }
+
+    [Fact]
+    [SupportedOSPlatform("windows10.0.17763.0")]
+    public void ProjFs_Dispose_BeforeStart_DoesNotThrow()
+    {
+        if (!IsProjFsOs()) return;
+        MakeProjFs().Dispose(); // must not throw
+    }
+
+    [Fact]
+    [SupportedOSPlatform("windows10.0.17763.0")]
+    public void ProjFs_Stop_BeforeStart_DoesNotThrow()
+    {
+        if (!IsProjFsOs()) return;
+        using var backend = MakeProjFs();
+        backend.Stop(); // must not throw
+    }
+
+    // ── Factory helpers ───────────────────────────────────────────────────────
+
+    private WinFspBackend MakeWinFsp(bool readOnly = false)
+    {
+        var blockCache   = new BlockCache("backend-test", cacheDir: _tempDir);
+        var rangeReaders = new RangeReaderRegistry();
+        return new WinFspBackend(
+            new MemoryFolder("root", "root"),
+            blockCache, rangeReaders, readOnly: readOnly);
+    }
+
+    [SupportedOSPlatform("windows10.0.17763.0")]
+    private ProjFsBackend MakeProjFs(bool readOnly = false)
+    {
+        var blockCache   = new BlockCache("backend-test", cacheDir: _tempDir);
+        var rangeReaders = new RangeReaderRegistry();
+        return new ProjFsBackend(
+            new MemoryFolder("root", "root"),
+            blockCache, rangeReaders, readOnly: readOnly);
+    }
+}
+
+// ── Test doubles ──────────────────────────────────────────────────────────────
+
+/// <summary>
+/// Minimal <see cref="IFolder"/> that is intentionally NOT <see cref="IModifiableFolder"/>,
+/// used to verify that <see cref="ProjFsBackend.IsReadOnly"/> is forced to <c>true</c>
+/// when the backing root is read-only.
+/// </summary>
+file sealed class ReadOnlyFolderStub(string id, string name) : IFolder
+{
+    public string Id   { get; } = id;
+    public string Name { get; } = name;
+
+    public IAsyncEnumerable<IStorableChild> GetItemsAsync(
+        StorableType type = StorableType.All,
+        CancellationToken cancellationToken = default)
+        => AsyncEnumerableEmpty<IStorableChild>();
+
+    private static async IAsyncEnumerable<T> AsyncEnumerableEmpty<T>()
+    {
+        yield break;
+    }
+}

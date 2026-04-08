@@ -68,7 +68,11 @@ public sealed partial class ProjFsBackend : IOwlMountBackend
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "OwlMount", "VirtRoot", driveLetter);
 
-        try { Directory.Delete(_virtRoot, recursive: true); } catch { /* best-effort */ }
+        // Remove any stale drive-letter mapping left by a previous crash, then wipe
+        // any leftover materialized files (ProjFS marks them read-only, so a plain
+        // Directory.Delete would throw — ForceDeleteDirectory clears attrs first).
+        DefineDosDevice(DDD_REMOVE_DEFINITION, mountPoint, null); // no-op if no mapping exists
+        ForceDeleteDirectory(_virtRoot);
         Directory.CreateDirectory(_virtRoot);
 
         NotificationMapping[] notificationMappings;
@@ -157,18 +161,38 @@ public sealed partial class ProjFsBackend : IOwlMountBackend
 
         if (_virtRoot is not null)
         {
-            try { Directory.Delete(_virtRoot, recursive: true); }
-            catch (Exception ex)
-            {
-                Console.Error.WriteLine(
-                    $"Warning: could not delete virtualization root '{_virtRoot}': {ex.Message}");
-            }
+            ForceDeleteDirectory(_virtRoot);
             _virtRoot = null;
         }
     }
 
     /// <inheritdoc/>
     public void Dispose() => Stop();
+
+    /// <summary>
+    /// Deletes <paramref name="path"/> and all its contents, first stripping any
+    /// <see cref="FileAttributes.ReadOnly"/> flags that ProjFS sets on placeholder
+    /// files (which would otherwise cause <see cref="Directory.Delete"/> to throw).
+    /// </summary>
+    private static void ForceDeleteDirectory(string path)
+    {
+        if (!Directory.Exists(path)) return;
+        try
+        {
+            foreach (string entry in Directory.EnumerateFileSystemEntries(
+                path, "*", SearchOption.AllDirectories))
+            {
+                try { File.SetAttributes(entry, FileAttributes.Normal); }
+                catch { /* best-effort: ignore locked/inaccessible entries */ }
+            }
+            Directory.Delete(path, recursive: true);
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine(
+                $"Warning: could not delete virtualization root '{path}': {ex.Message}");
+        }
+    }
 
     [LibraryImport("kernel32", EntryPoint = "DefineDosDeviceW", SetLastError = true, StringMarshalling = StringMarshalling.Utf16)]
     [return: MarshalAs(UnmanagedType.Bool)]
