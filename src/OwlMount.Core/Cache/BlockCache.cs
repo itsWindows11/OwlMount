@@ -148,5 +148,19 @@ public sealed class BlockCache : IDisposable
         return string.Concat(name.Select(c => Array.IndexOf(invalid, c) >= 0 ? '_' : c));
     }
 
+    /// <summary>
+    /// Removes all cached blocks for <paramref name="fileId"/>.
+    /// </summary>
+    public void Invalidate(string fileId)
+    {
+        string fileKey = ComputeFileKey(fileId);
+        string pattern = $"{fileKey}_*.blk";
+
+        foreach (string path in Directory.EnumerateFiles(_cacheDir, pattern))
+        {
+            try { File.Delete(path); } catch { /* best-effort */ }
+        }
+    }
+
     public void Dispose() { }
 }

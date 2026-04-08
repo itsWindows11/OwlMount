@@ -42,10 +42,11 @@ static class Program
 
     static async Task<int> RunMountAsync(string[] args)
     {
-        string  provider   = "memory";
-        string  letter     = "M";
-        string? label      = null;
-        string? path       = null;
+        string  provider     = "memory";
+        string  letter       = "M";
+        string? label        = null;
+        string? path         = null;
+        bool    forceReadOnly = false;
         // S3
         string? s3Bucket   = null;
         string? s3Prefix   = null;
@@ -62,7 +63,7 @@ static class Program
         string? nfsExport  = null;
         string? nfsPath    = "/";
 
-        for (int i = 0; i < args.Length - 1; i++)
+        for (int i = 0; i < args.Length; i++)
         {
             switch (args[i].ToLowerInvariant())
             {
@@ -82,6 +83,10 @@ static class Program
                 case "--host":        nfsHost    = args[++i]; break;
                 case "--export":      nfsExport  = args[++i]; break;
                 case "--nfs-path":    nfsPath    = args[++i]; break;
+                case "--read-only":
+                case "--readonly":
+                    forceReadOnly = true;
+                    break;
             }
         }
 
@@ -209,9 +214,12 @@ static class Program
             _          => "OwlMount",
         };
 
+        bool isReadOnly = forceReadOnly || root is not IModifiableFolder;
+
         Console.WriteLine($"OwlMount — provider: {provider}");
         Console.WriteLine($"  Root   : {displayRoot}");
         Console.WriteLine($"  Label  : {resolvedLabel}");
+        Console.WriteLine($"  Mode   : {(isReadOnly ? "read-only" : "read-write")}");
 
         // ── Build the VFS components ──────────────────────────────────────────
         var rangeReaders  = new RangeReaderRegistry();
@@ -223,6 +231,7 @@ static class Program
 
         var fs = new OwlMountFileSystem(
             root, blockCache, rangeReaders, sizeProviders,
+            readOnly: forceReadOnly,
             volumeLabel: resolvedLabel,
             onDispatcherStopped: () =>
             {
@@ -429,6 +438,7 @@ static class Program
         Console.WriteLine("  --provider   memory | kubo-mfs | kubo-ipfs | kubo-ipns | s3 | nfs  (default: memory)");
         Console.WriteLine("  --letter     Drive letter to mount on (default: M)");
         Console.WriteLine("  --label      Volume label shown in Explorer (default: auto)");
+        Console.WriteLine("  --read-only  Force the mounted filesystem to open as read-only");
         Console.WriteLine();
         Console.WriteLine("  memory       (no extra flags; drive starts empty)");
         Console.WriteLine("  kubo-mfs     --path <mfs-path>  [--api-url http://127.0.0.1:5001]");
@@ -442,6 +452,7 @@ static class Program
         Console.WriteLine();
         Console.WriteLine("Examples:");
         Console.WriteLine("  owlmount mount --provider memory --letter R");
+        Console.WriteLine("  owlmount mount --provider memory --letter R --read-only");
         Console.WriteLine("  owlmount mount --provider kubo-mfs --path /my/dir --letter K --label IPFS");
         Console.WriteLine("  owlmount mount --provider kubo-ipfs --cid bafybei... --letter I");
         Console.WriteLine("  owlmount mount --provider s3 --bucket my-bucket --prefix data/ --letter S");

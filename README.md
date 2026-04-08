@@ -6,7 +6,10 @@ Windows drive letter using [WinFsp](https://winfsp.dev).
 
 ## Features (MVP)
 
-* **Read-only** drive-letter mount backed by any `IFolder` / `IFile` provider
+* **Read/write mounts where supported** — mutable providers are exposed as writable drives
+* **Forced read-only mode** — pass `--read-only` to mount any provider as read-only
+* **Live refresh where supported** — providers that expose `IFolderWatcher` push folder changes into the mounted drive view
+* **Immutable providers stay read-only** — providers such as `kubo-ipfs` are mounted read-only by capability
 * **Block cache** — 256 KiB blocks persisted to disk under
   `%LocalAppData%\OwlMount\Cache\` to avoid re-downloading data
 * **Adapter registry** — plug in custom `IRangeReader` / `ISizeProvider`
@@ -45,6 +48,7 @@ owlmount mount --provider memory --letter R
 | `--provider` | `memory` | Provider name. See table below. |
 | `--letter` | `M` | Drive letter to mount (without the colon) |
 | `--label` | *(auto)* | Volume label shown in Explorer (e.g. `"My Files"`) |
+| `--read-only` | `false` | Force the mount to open as read-only, even if the provider supports writes |
 
 Pressing **Ctrl+C**, running `owlmount unmount --letter <X>` from another terminal, or ejecting/unmounting the drive from Windows Explorer all cleanly exit the process.
 
@@ -58,15 +62,19 @@ Pressing **Ctrl+C**, running `owlmount unmount --letter <X>` from another termin
 
 ### Supported providers
 
-| `--provider` | Extra flags | Description |
-|---|---|---|
-| `memory` | *(none)* | Empty in-memory filesystem (default; lives until process exits) |
-| `kubo-mfs` | `--path <mfs-path>` `[--api-url]` | Kubo MFS (Mutable File System) |
-| `kubo-ipfs` | `--cid <CID>` `[--api-url]` | Immutable IPFS directory by CID |
-| `kubo-ipns` | `--ipns <address>` `[--api-url]` | IPNS-addressed directory |
-| `s3` | `--bucket` `[--prefix]` `[--access-key]` `[--secret-key]` `[--region]` `[--endpoint]` | Amazon S3 bucket/prefix |
-| `nfs` | `--host <ip>` `--export </path>` `[--nfs-path <path>]` | NFS v3 share |
+| `--provider` | Default access | Extra flags | Description |
+|---|---|---|---|
+| `memory` | Read/write | *(none)* | Empty in-memory filesystem (default; lives until process exits) |
+| `kubo-mfs` | Read/write | `--path <mfs-path>` `[--api-url]` | Kubo MFS (Mutable File System) |
+| `kubo-ipfs` | Read-only | `--cid <CID>` `[--api-url]` | Immutable IPFS directory by CID |
+| `kubo-ipns` | Read/write | `--ipns <address>` `[--api-url]` | IPNS-addressed directory |
+| `s3` | Read/write | `--bucket` `[--prefix]` `[--access-key]` `[--secret-key]` `[--region]` `[--endpoint]` | Amazon S3 bucket/prefix |
+| `nfs` | Read/write | `--host <ip>` `--export </path>` `[--nfs-path <path>]` | NFS v3 share |
 
+> Pass `--read-only` with any provider to suppress write support for that mount.
+>
+> Live folder refresh is enabled only for providers and folders that successfully expose `IFolderWatcher`; unsupported providers continue to rely on cache TTL and local invalidation.
+>
 > **OneDrive** is supported as a code-level provider (`OneDriveFolder` / `OneDriveFile` from `OwlCore.Storage.OneDrive`) but requires a pre-authenticated `GraphServiceClient` from MSAL — see the *Adding a custom provider* section.
 
 ### Example — empty in-memory filesystem as `R:`
@@ -79,6 +87,12 @@ The drive starts completely empty. Any files or folders you copy into `R:\` exis
 
 ```bat
 owlmount unmount --letter R
+```
+
+### Example — same in-memory filesystem forced read-only
+
+```bat
+owlmount mount --provider memory --letter R --label "RAM Drive" --read-only
 ```
 
 ### Example — Kubo MFS as `K:`
@@ -105,7 +119,7 @@ owlmount mount --provider nfs --host 192.168.1.10 --export /srv/share --letter N
 ## Architecture
 
 ```
-OwlMount.sln
+OwlMount.slnx
 ├── src/
 │   ├── OwlMount.Core/            Cross-platform .NET 10 library
 │   │   ├── Abstractions/         IRangeReader, ISizeProvider, PathIndexEntry

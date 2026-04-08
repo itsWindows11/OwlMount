@@ -8,7 +8,7 @@ namespace OwlMount.WinFspHost.Providers.Nfs;
 /// <summary>
 /// An <see cref="IFolder"/> backed by a directory on an NFS server.
 /// </summary>
-internal sealed partial class NfsFolder : IChildFolder, IGetItem, IGetFirstByName
+internal sealed partial class NfsFolder : IChildFolder, IGetItem, IGetFirstByName, IModifiableFolder
 {
     internal readonly NfsClient _nfsClient;
 
@@ -98,6 +98,66 @@ internal sealed partial class NfsFolder : IChildFolder, IGetItem, IGetFirstByNam
                 yield return new NfsFile(_nfsClient, entryPath, attrs);
         }
     }
+
+    /// <inheritdoc/>
+    public Task<IFolderWatcher> GetFolderWatcherAsync(CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException("NFS folder watching is not supported.");
+
+    /// <inheritdoc/>
+    public async Task<IChildFolder> CreateFolderAsync(
+        string name,
+        bool replaceExisting = false,
+        CancellationToken cancellationToken = default)
+    {
+        var childPath = NfsHelpers.CombinePath(Path, name);
+        var existing = await NfsHelpers.GetStorableAsync(_nfsClient, childPath, cancellationToken);
+
+        if (existing is not null)
+        {
+            if (!replaceExisting)
+                throw new IOException($"An item already exists at NFS path \"{childPath}\".");
+
+            await DeleteAsync((IStorableChild)existing, cancellationToken);
+        }
+
+        await _nfsClient.MkDirAsync(childPath, new NfsSetAttributes(), cancellationToken);
+        var attrs = await _nfsClient.GetAttrAsync(childPath, cancellationToken);
+        return new NfsFolder(_nfsClient, childPath, attrs);
+    }
+
+    /// <inheritdoc/>
+    public async Task<IChildFile> CreateFileAsync(
+        string name,
+        bool replaceExisting = false,
+        CancellationToken cancellationToken = default)
+    {
+        var childPath = NfsHelpers.CombinePath(Path, name);
+        var existing = await NfsHelpers.GetStorableAsync(_nfsClient, childPath, cancellationToken);
+
+        if (existing is not null)
+        {
+            if (!replaceExisting)
+                throw new IOException($"An item already exists at NFS path \"{childPath}\".");
+
+            await DeleteAsync((IStorableChild)existing, cancellationToken);
+        }
+
+        await using (var stream = await _nfsClient.OpenFileAsync(childPath, FileAccess.ReadWrite, create: true, cancellationToken))
+        {
+        }
+
+        var attrs = await _nfsClient.GetAttrAsync(childPath, cancellationToken);
+        return new NfsFile(_nfsClient, childPath, attrs);
+    }
+
+    /// <inheritdoc/>
+    public Task DeleteAsync(IStorableChild item, CancellationToken cancellationToken = default) =>
+        item switch
+        {
+            NfsFile file => _nfsClient.RemoveAsync(file.Path, cancellationToken),
+            NfsFolder folder => _nfsClient.RmDirAsync(folder.Path, cancellationToken),
+            _ => _nfsClient.RemoveAsync(NfsHelpers.CombinePath(Path, item.Name), cancellationToken),
+        };
 
     // ── Static factory helpers ────────────────────────────────────────────────
 
