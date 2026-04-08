@@ -1072,6 +1072,14 @@ public sealed class OwlMountFileSystem : FileSystemBase
         }
         catch
         {
+            // Don't enumerate entire bucket for known non-existent files
+            if (name.Equals("desktop.ini", StringComparison.OrdinalIgnoreCase) ||
+                name.Equals("thumbs.db", StringComparison.OrdinalIgnoreCase) ||
+                name.Equals("autorun.inf", StringComparison.OrdinalIgnoreCase))
+            {
+                return null;
+            }
+            
             return folder.GetItemsAsync()
                 .ToBlockingEnumerable()
                 .FirstOrDefault(x => string.Equals(x.Name, name, StringComparison.OrdinalIgnoreCase));
