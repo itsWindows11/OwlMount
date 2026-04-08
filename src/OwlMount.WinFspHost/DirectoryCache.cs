@@ -62,4 +62,5 @@ public sealed record DirectoryEntry(
     bool IsDirectory,
     long Size,
     DateTimeOffset CreatedAt,
+    DateTimeOffset LastAccessed,
     DateTimeOffset LastModified);
