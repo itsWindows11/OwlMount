@@ -3,6 +3,7 @@ using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using Amazon.Runtime;
 using Amazon.S3;
+using Amazon.S3.Model;
 using Ipfs.Http;
 using NfsSharp;
 using OwlCore.Kubo;
@@ -12,6 +13,7 @@ using OwlCore.Storage.Memory;
 using OwlCore.Storage.NfsSharp;
 using OwlCore.Storage.SharpCompress;
 using OwlCore.Storage.System.IO;
+using OwlMount.Core.Abstractions;
 using OwlMount.Core.Cache;
 using OwlMount.Core.Registry;
 using OwlMount.Core.Windows.Backends;
@@ -302,6 +304,12 @@ static partial class Program
         var rangeReaders  = new RangeReaderRegistry();
         var sizeProviders = new SizeProviderRegistry();
         var blockCache    = new BlockCache(providerId: $"{provider}_{root.Id}");
+
+        // Register provider-specific optimisations.
+        // S3: use a HEAD request (GetObjectMetadata) to get file size rather than
+        // opening a full GET stream, which makes Open() ~10x faster for S3 files.
+        if (root is S3Folder)
+            sizeProviders.Register(f => f is S3File, new S3HeadSizeProvider());
 
         // CTS shared by CancelKeyPress and backend.Stopped so either path exits cleanly.
         var cts = new CancellationTokenSource();
@@ -684,6 +692,22 @@ static partial class Program
     }
 
     // ── S3 TLS helper ─────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// <see cref="ISizeProvider"/> for S3 files that uses a HEAD request
+    /// (<see cref="S3File.GetMetadataAsync"/>) to retrieve the object's
+    /// <see cref="GetObjectMetadataResponse.ContentLength"/> cheaply, instead of
+    /// opening a full GET stream just to read <see cref="System.IO.Stream.Length"/>.
+    /// </summary>
+    private sealed class S3HeadSizeProvider : ISizeProvider
+    {
+        public async Task<long?> GetSizeAsync(IFile file, CancellationToken ct = default)
+        {
+            if (file is not S3File s3File) return null;
+            GetObjectMetadataResponse meta = await s3File.GetMetadataAsync(ct);
+            return meta.ContentLength;
+        }
+    }
 
     /// <summary>
     /// Custom <see cref="Amazon.Runtime.HttpClientFactory"/> that creates an

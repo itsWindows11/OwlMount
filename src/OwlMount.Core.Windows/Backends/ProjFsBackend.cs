@@ -75,6 +75,13 @@ public sealed partial class ProjFsBackend : IOwlMountBackend
         ForceDeleteDirectory(_virtRoot);
         Directory.CreateDirectory(_virtRoot);
 
+        // FileHandleClosedNoModification is always registered so the provider can
+        // de-hydrate files back to virtual placeholder state after reading,
+        // preventing content from accumulating in the virtRoot during the session.
+        // Note: the virtRoot directory itself is a hard requirement of the Windows
+        // ProjFS API (PrjStartVirtualizing) and cannot be eliminated.
+        var baseNotificationMask = NotificationType.FileHandleClosedNoModification;
+
         NotificationMapping[] notificationMappings;
         if (!IsReadOnly)
         {
@@ -84,6 +91,7 @@ public sealed partial class ProjFsBackend : IOwlMountBackend
                 {
                     NotificationRoot = string.Empty,
                     NotificationMask =
+                        baseNotificationMask                         |
                         NotificationType.NewFileCreated              |
                         NotificationType.FileOverwritten             |
                         NotificationType.PreDelete                   |
@@ -96,7 +104,14 @@ public sealed partial class ProjFsBackend : IOwlMountBackend
         }
         else
         {
-            notificationMappings = [];
+            notificationMappings =
+            [
+                new NotificationMapping
+                {
+                    NotificationRoot = string.Empty,
+                    NotificationMask = baseNotificationMask,
+                },
+            ];
         }
 
         _vi = new VirtualizationInstance(

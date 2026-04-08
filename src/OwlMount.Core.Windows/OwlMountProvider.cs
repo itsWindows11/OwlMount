@@ -31,6 +31,13 @@ public sealed class OwlMountProvider : IRequiredCallbacks
     private string? _virtRoot;
 
     /// <summary>
+    /// Cache of resolved <see cref="IFolder"/> objects keyed by normalized path,
+    /// used to avoid re-traversing path segments from root on every callback.
+    /// </summary>
+    private readonly ConcurrentDictionary<string, IFolder> _folderObjects =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
     /// Called by <see cref="Backends.ProjFsBackend"/> before
     /// <see cref="VirtualizationInstance.StartVirtualizing"/> is invoked.
     /// Registers write-back notification delegates on <paramref name="vi"/> when
@@ -40,6 +47,11 @@ public sealed class OwlMountProvider : IRequiredCallbacks
     {
         _vi       = vi;
         _virtRoot = virtRoot;
+
+        // De-hydrate files back to virtual placeholder state after the last read
+        // handle closes, so hydrated content does not accumulate in the virtRoot
+        // during the session.  This is registered regardless of read-only mode.
+        vi.OnNotifyFileHandleClosedNoModification = OnNotifyFileHandleClosedNoModification;
 
         if (_isReadOnly) return;
 
@@ -75,6 +87,7 @@ public sealed class OwlMountProvider : IRequiredCallbacks
         _rangeReaders  = rangeReaders;
         _sizeProviders = sizeProviders ?? new SizeProviderRegistry();
         _isReadOnly    = readOnly || root is not IModifiableFolder;
+        _folderObjects[string.Empty] = root; // seed with root
     }
 
     // ── IRequiredCallbacks ────────────────────────────────────────────────────
@@ -116,6 +129,9 @@ public sealed class OwlMountProvider : IRequiredCallbacks
                         CreatedAt      = created,
                         LastModifiedAt = modified,
                     });
+
+                    if (item is IFolder childFolder)
+                        _folderObjects.TryAdd(childPath, childFolder);
 
                     return new DirectoryEntry(
                         item.Name,
@@ -290,18 +306,33 @@ public sealed class OwlMountProvider : IRequiredCallbacks
     private PathIndexEntry? ResolveAndIndex(string normalizedPath)
     {
         string[] segments = normalizedPath.Split('/');
-        IFolder current   = _root;
+        string parentPath = GetParentPath(normalizedPath);
 
-        for (int i = 0; i < segments.Length - 1; i++)
+        IFolder current;
+        if (_folderObjects.TryGetValue(parentPath, out IFolder? cachedParent))
         {
-            IFolder? sub = GetChildFolder(current, segments[i]);
-            if (sub is null) return null;
-            current = sub;
+            current = cachedParent;
+        }
+        else
+        {
+            current = _root;
+            string currPath = string.Empty;
+            for (int i = 0; i < segments.Length - 1; i++)
+            {
+                IFolder? sub = GetChildFolder(current, segments[i]);
+                if (sub is null) return null;
+                current = sub;
+                currPath = CombineNormalizedPath(currPath, segments[i]);
+                _folderObjects.TryAdd(currPath, current);
+            }
         }
 
         string lastName = segments[^1];
         IStorableChild? child = GetChild(current, lastName);
         if (child is null) return null;
+
+        if (child is IFolder folder)
+            _folderObjects.TryAdd(normalizedPath, folder);
 
         bool isFile = child is IFile;
         var entry = new PathIndexEntry
@@ -319,13 +350,22 @@ public sealed class OwlMountProvider : IRequiredCallbacks
     private IFile? ResolveFile(string normalizedPath)
     {
         string[] segments = normalizedPath.Split('/');
-        IFolder current   = _root;
+        string parentPath = GetParentPath(normalizedPath);
 
+        // Fast path: parent already cached
+        if (_folderObjects.TryGetValue(parentPath, out IFolder? parent))
+            return GetChildFile(parent, segments[^1]);
+
+        // Full resolution from root, caching each intermediate folder
+        IFolder current = _root;
+        string currPath = string.Empty;
         for (int i = 0; i < segments.Length - 1; i++)
         {
             IFolder? sub = GetChildFolder(current, segments[i]);
             if (sub is null) return null;
             current = sub;
+            currPath = CombineNormalizedPath(currPath, segments[i]);
+            _folderObjects.TryAdd(currPath, current);
         }
 
         return GetChildFile(current, segments[^1]);
@@ -333,18 +373,34 @@ public sealed class OwlMountProvider : IRequiredCallbacks
 
     private IFolder? ResolveFolder(string normalizedPath)
     {
+        // Return immediately if already cached
+        if (_folderObjects.TryGetValue(normalizedPath, out IFolder? existing))
+            return existing;
+
         string[] segments = normalizedPath.Split('/');
-        IFolder current   = _root;
+        IFolder current = _root;
+        string currentPath = string.Empty;
 
         foreach (string seg in segments)
         {
             IFolder? sub = GetChildFolder(current, seg);
             if (sub is null) return null;
             current = sub;
+            currentPath = CombineNormalizedPath(currentPath, seg);
+            _folderObjects.TryAdd(currentPath, current);
         }
 
         return current;
     }
+
+    private static string GetParentPath(string normalizedPath)
+    {
+        int slash = normalizedPath.LastIndexOf('/');
+        return slash < 0 ? string.Empty : normalizedPath[..slash];
+    }
+
+    private static string CombineNormalizedPath(string parentPath, string name) =>
+        string.IsNullOrEmpty(parentPath) ? name : parentPath + "/" + name;
 
     private IStorableChild? GetChild(IFolder folder, string name)
     {
@@ -365,6 +421,48 @@ public sealed class OwlMountProvider : IRequiredCallbacks
     private static DateTimeOffset? GetLastModifiedAt(IStorable item) => StorageTimestampHelper.GetLastModifiedAt(item);
 
     
+
+    // ── De-hydration ─────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Called when the last read handle on a file is closed without modification.
+    /// Reverts the file from hydrated-placeholder state back to virtual-placeholder
+    /// state so the locally-materialized content is discarded and disk space is freed.
+    /// <para>
+    /// Note: the Windows ProjFS API requires a physical virtRoot directory — there is
+    /// no mode that prevents files from being written there during a session.  This
+    /// callback is the closest approximation to "no local cache" that ProjFS supports.
+    /// </para>
+    /// </summary>
+    private void OnNotifyFileHandleClosedNoModification(
+        string relativePath, bool isDirectory,
+        uint triggeringProcessId, string triggeringProcessImageFileName)
+    {
+        if (isDirectory || _vi is null) return;
+
+        string norm = NormalizeProjFsPath(relativePath);
+        PathIndexEntry? entry = _index.TryGet(norm);
+
+        // Only de-hydrate when we have accurate size; otherwise the placeholder
+        // written back would have the wrong endOfFile value.
+        if (entry is null || !entry.Size.HasValue) return;
+
+        DateTime created  = entry.CreatedAt?.DateTime       ?? DateTime.MinValue;
+        DateTime modified = entry.LastModifiedAt?.DateTime  ?? DateTime.MinValue;
+        FileAttributes attrs = _isReadOnly ? FileAttributes.ReadOnly : FileAttributes.Archive;
+
+        var failCause = UpdateFailureCause.NoFailure;
+        _vi.UpdateFileIfNeeded(
+            relativePath,
+            created, modified, modified, modified,
+            attrs, entry.Size.Value,
+            contentId:  null,
+            providerId: null,
+            UpdateType.AllowDirtyData | UpdateType.AllowReadOnly | UpdateType.AllowDirtyMetadata,
+            out failCause);
+        // Failure is intentionally ignored — the file simply stays hydrated for
+        // the remainder of the session and is cleaned up by Stop().
+    }
 
     // ── Write-back notification delegates ────────────────────────────────────
     // Registered on VirtualizationInstance in SetInstance when !_isReadOnly.

@@ -35,6 +35,14 @@ public sealed class OwlMountFileSystem : FileSystemBase
     private readonly ulong _freeSize;
     private readonly ConcurrentDictionary<string, WatchedFolder> _watchedFolders =
         new(StringComparer.OrdinalIgnoreCase);
+    /// <summary>
+    /// Cache of resolved <see cref="IFolder"/> objects keyed by normalized path.
+    /// Populated during directory listing and path traversal so that
+    /// <see cref="ResolveFile"/> and <see cref="ResolveFolder"/> can start from the
+    /// deepest known ancestor instead of re-traversing from root on every call.
+    /// </summary>
+    private readonly ConcurrentDictionary<string, IFolder> _folderObjects =
+        new(StringComparer.OrdinalIgnoreCase);
     private readonly object _notifySync = new();
 
     private FileSystemHost? _host;
@@ -69,6 +77,7 @@ public sealed class OwlMountFileSystem : FileSystemBase
         _isReadOnly = readOnly || root is not IModifiableFolder;
         _totalSize = totalSize.GetValueOrDefault(DefaultVolumeSize);
         _freeSize = _isReadOnly ? 0 : Math.Min(freeSize ?? _totalSize, _totalSize);
+        _folderObjects[string.Empty] = root; // seed the cache with the root
     }
 
     // ── Lifecycle ─────────────────────────────────────────────────────────────
@@ -102,6 +111,7 @@ public sealed class OwlMountFileSystem : FileSystemBase
             watcher.Dispose();
 
         _watchedFolders.Clear();
+        _folderObjects.Clear();
         _host = null;
         base.Unmounted(host);
     }
@@ -186,6 +196,7 @@ public sealed class OwlMountFileSystem : FileSystemBase
             IFolder? folder = ResolveFolder(norm);
             if (folder is null) return STATUS_OBJECT_NAME_NOT_FOUND;
             EnsureFolderWatcher(folder, norm);
+            _folderObjects.TryAdd(norm, folder);
             fileNode = new FolderContext(folder, norm);
             FillFolderInfo(ref fileInfo, entry);
         }
@@ -942,10 +953,15 @@ public sealed class OwlMountFileSystem : FileSystemBase
 
             string childPath = CombineNormalizedPath(ctx.NormalizedPath, item.Name);
             if (item is IFolder childFolder)
+            {
                 EnsureFolderWatcher(childFolder, childPath);
+                _folderObjects.TryAdd(childPath, childFolder);
+            }
 
-            long? knownSize = item is IFile file
-                ? TryGetFileSize(file, childPath)
+            // Re-use a previously cached size (e.g. from a prior Open call) rather
+            // than making a network call for every file during a directory listing.
+            long? knownSize = item is IFile
+                ? (_index.TryGet(childPath) is { Size: long cachedSize } ? cachedSize : null)
                 : null;
 
             _index.AddOrUpdate(childPath, new PathIndexEntry
@@ -994,13 +1010,26 @@ public sealed class OwlMountFileSystem : FileSystemBase
     private PathIndexEntry? ResolveAndIndex(string normalizedPath)
     {
         string[] segments = normalizedPath.Split('/');
-        IFolder current = _root;
+        string parentPath = GetParentPath(normalizedPath);
 
-        for (int i = 0; i < segments.Length - 1; i++)
+        // Use cached parent folder to skip intermediate traversal
+        IFolder current;
+        if (_folderObjects.TryGetValue(parentPath, out IFolder? cachedParent))
         {
-            IFolder? sub = GetChildFolder(current, segments[i]);
-            if (sub is null) return null;
-            current = sub;
+            current = cachedParent;
+        }
+        else
+        {
+            current = _root;
+            string currPath = string.Empty;
+            for (int i = 0; i < segments.Length - 1; i++)
+            {
+                IFolder? sub = GetChildFolder(current, segments[i]);
+                if (sub is null) return null;
+                current = sub;
+                currPath = CombineNormalizedPath(currPath, segments[i]);
+                _folderObjects.TryAdd(currPath, current);
+            }
         }
 
         string lastName = segments[^1];
@@ -1008,9 +1037,13 @@ public sealed class OwlMountFileSystem : FileSystemBase
         if (child is null) return null;
 
         if (child is IFolder folder)
+        {
             EnsureFolderWatcher(folder, normalizedPath);
+            _folderObjects.TryAdd(normalizedPath, folder);
+        }
 
-        PathIndexEntry entry = CreateEntry(child, child is IFile file ? TryGetFileSize(file, normalizedPath) : null);
+        // Size is resolved lazily on first Open() to avoid a network call here.
+        PathIndexEntry entry = CreateEntry(child, knownSize: null);
         _index.AddOrUpdate(normalizedPath, entry);
         return entry;
     }
@@ -1018,13 +1051,22 @@ public sealed class OwlMountFileSystem : FileSystemBase
     private IFile? ResolveFile(string normalizedPath)
     {
         string[] segments = normalizedPath.Split('/');
-        IFolder current = _root;
+        string parentPath = GetParentPath(normalizedPath);
 
+        // Fast path: parent folder already resolved
+        if (_folderObjects.TryGetValue(parentPath, out IFolder? parent))
+            return GetChildFile(parent, segments[^1]);
+
+        // Full resolution from root, caching each intermediate folder
+        IFolder current = _root;
+        string currPath = string.Empty;
         for (int i = 0; i < segments.Length - 1; i++)
         {
             IFolder? sub = GetChildFolder(current, segments[i]);
             if (sub is null) return null;
             current = sub;
+            currPath = CombineNormalizedPath(currPath, segments[i]);
+            _folderObjects.TryAdd(currPath, current);
         }
 
         return GetChildFile(current, segments[^1]);
@@ -1032,6 +1074,10 @@ public sealed class OwlMountFileSystem : FileSystemBase
 
     private IFolder? ResolveFolder(string normalizedPath)
     {
+        // Return immediately if already cached
+        if (_folderObjects.TryGetValue(normalizedPath, out IFolder? existing))
+            return existing;
+
         string[] segments = normalizedPath.Split('/');
         IFolder current = _root;
         string currentPath = string.Empty;
@@ -1045,6 +1091,7 @@ public sealed class OwlMountFileSystem : FileSystemBase
             current = sub;
             currentPath = CombineNormalizedPath(currentPath, seg);
             EnsureFolderWatcher(current, currentPath);
+            _folderObjects.TryAdd(currentPath, current);
         }
 
         return current;
@@ -1148,8 +1195,19 @@ public sealed class OwlMountFileSystem : FileSystemBase
     {
         _index.RemoveSubtree(normalizedPath);
         _dirCache.InvalidateSubtree(normalizedPath);
+        RemoveFolderObjectSubtree(normalizedPath);
         if (!string.IsNullOrWhiteSpace(fileId))
             _blockCache.Invalidate(fileId);
+    }
+
+    private void RemoveFolderObjectSubtree(string normalizedPath)
+    {
+        _folderObjects.TryRemove(normalizedPath, out _);
+        if (string.IsNullOrEmpty(normalizedPath)) return;
+        string prefix = normalizedPath + "/";
+        foreach (string key in _folderObjects.Keys.ToList())
+            if (key.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                _folderObjects.TryRemove(key, out _);
     }
 
     private static string GetParentPath(string normalizedPath)
