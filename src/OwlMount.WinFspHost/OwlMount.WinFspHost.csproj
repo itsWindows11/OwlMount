@@ -19,6 +19,7 @@
     <PackageReference Include="OwlCore.Storage.OneDrive" Version="0.3.0" />
     <PackageReference Include="OwlCore.Storage.AmazonS3" Version="0.1.1" />
     <PackageReference Include="OwlCore.Storage.NfsSharp" Version="0.1.0" />
+    <PackageReference Include="OwlCore.Storage.SharpCompress" Version="0.2.0" />
   </ItemGroup>
 
 </Project>

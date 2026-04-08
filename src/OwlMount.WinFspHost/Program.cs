@@ -10,6 +10,8 @@ using OwlCore.Storage;
 using OwlCore.Storage.AmazonS3;
 using OwlCore.Storage.Memory;
 using OwlCore.Storage.NfsSharp;
+using OwlCore.Storage.SharpCompress;
+using OwlCore.Storage.System.IO;
 using OwlMount.Core.Cache;
 using OwlMount.Core.Registry;
 using OwlMount.WinFspHost;
@@ -64,27 +66,30 @@ static partial class Program
         string? nfsHost    = null;
         string? nfsExport  = null;
         string? nfsPath    = "/";
+        // Archive
+        string? archiveFile = null;
 
         for (int i = 0; i < args.Length; i++)
         {
             switch (args[i].ToLowerInvariant())
             {
-                case "--provider":    provider   = args[++i]; break;
-                case "--letter":      letter     = args[++i]; break;
-                case "--label":       label      = args[++i]; break;
-                case "--path":        path       = args[++i]; break;
-                case "--bucket":      s3Bucket   = args[++i]; break;
-                case "--prefix":      s3Prefix   = args[++i]; break;
-                case "--access-key":  s3Key      = args[++i]; break;
-                case "--secret-key":  s3Secret   = args[++i]; break;
-                case "--region":      s3Region   = args[++i]; break;
-                case "--endpoint":    s3Endpoint = args[++i]; break;
-                case "--api-url":     apiUrl     = args[++i]; break;
-                case "--cid":         cid        = args[++i]; break;
-                case "--ipns":        ipnsAddr   = args[++i]; break;
-                case "--host":        nfsHost    = args[++i]; break;
-                case "--export":      nfsExport  = args[++i]; break;
-                case "--nfs-path":    nfsPath    = args[++i]; break;
+                case "--provider":     provider    = args[++i]; break;
+                case "--letter":       letter      = args[++i]; break;
+                case "--label":        label       = args[++i]; break;
+                case "--path":         path        = args[++i]; break;
+                case "--archive-file": archiveFile = args[++i]; break;
+                case "--bucket":       s3Bucket    = args[++i]; break;
+                case "--prefix":       s3Prefix    = args[++i]; break;
+                case "--access-key":   s3Key       = args[++i]; break;
+                case "--secret-key":   s3Secret    = args[++i]; break;
+                case "--region":       s3Region    = args[++i]; break;
+                case "--endpoint":     s3Endpoint  = args[++i]; break;
+                case "--api-url":      apiUrl      = args[++i]; break;
+                case "--cid":          cid         = args[++i]; break;
+                case "--ipns":         ipnsAddr    = args[++i]; break;
+                case "--host":         nfsHost     = args[++i]; break;
+                case "--export":       nfsExport   = args[++i]; break;
+                case "--nfs-path":     nfsPath     = args[++i]; break;
                 case "--read-only":
                 case "--readonly":
                     forceReadOnly = true;
@@ -104,6 +109,29 @@ static partial class Program
                 displayRoot = "(in-memory, starts empty)";
                 (totalSize, freeSize) = GetMemoryVolumeSpace();
                 break;
+
+            // ── archive ───────────────────────────────────────────────────────
+            case "archive":
+            {
+                string resolvedArchivePath = archiveFile ?? path ?? string.Empty;
+                if (string.IsNullOrWhiteSpace(resolvedArchivePath))
+                {
+                    Console.Error.WriteLine("Error: --archive-file is required for provider 'archive'.");
+                    return 1;
+                }
+
+                string fullArchivePath = Path.GetFullPath(resolvedArchivePath);
+                if (!File.Exists(fullArchivePath))
+                {
+                    Console.Error.WriteLine($"Error: archive file not found: {fullArchivePath}");
+                    return 1;
+                }
+
+                root = new ArchiveFolder(new SystemFile(fullArchivePath));
+                displayRoot = fullArchivePath;
+                totalSize = TryGetArchiveVolumeSize(fullArchivePath);
+                break;
+            }
 
             // ── kubo-mfs ──────────────────────────────────────────────────────
             case "kubo-mfs":
@@ -215,6 +243,7 @@ static partial class Program
         string resolvedLabel = label ?? provider.ToUpperInvariant() switch
         {
             "MEMORY"    => "OwlMount (Memory)",
+            "ARCHIVE"   => "OwlMount (Archive)",
             "KUBO-MFS"  => "OwlMount (MFS)",
             "KUBO-IPFS" => "OwlMount (IPFS)",
             "KUBO-IPNS" => "OwlMount (IPNS)",
@@ -451,12 +480,13 @@ static partial class Program
         Console.WriteLine("  owlmount list");
         Console.WriteLine();
         Console.WriteLine("Mount options (all providers):");
-        Console.WriteLine("  --provider   memory | kubo-mfs | kubo-ipfs | kubo-ipns | s3 | nfs  (default: memory)");
+        Console.WriteLine("  --provider   memory | archive | kubo-mfs | kubo-ipfs | kubo-ipns | s3 | nfs  (default: memory)");
         Console.WriteLine("  --letter     Drive letter to mount on (default: M)");
         Console.WriteLine("  --label      Volume label shown in Explorer (default: auto)");
         Console.WriteLine("  --read-only  Force the mounted filesystem to open as read-only");
         Console.WriteLine();
         Console.WriteLine("  memory       (no extra flags; drive starts empty)");
+        Console.WriteLine("  archive      --archive-file <local-archive-path>");
         Console.WriteLine("  kubo-mfs     --path <mfs-path>  [--api-url http://127.0.0.1:5001]");
         Console.WriteLine("  kubo-ipfs    --cid <CID>        [--api-url http://127.0.0.1:5001]");
         Console.WriteLine("  kubo-ipns    --ipns <address>   [--api-url http://127.0.0.1:5001]");
@@ -469,6 +499,7 @@ static partial class Program
         Console.WriteLine("Examples:");
         Console.WriteLine("  owlmount mount --provider memory --letter R");
         Console.WriteLine("  owlmount mount --provider memory --letter R --read-only");
+        Console.WriteLine("  owlmount mount --provider archive --archive-file C:\\data\\backup.zip --letter A");
         Console.WriteLine("  owlmount mount --provider kubo-mfs --path /my/dir --letter K --label IPFS");
         Console.WriteLine("  owlmount mount --provider kubo-ipfs --cid bafybei... --letter I");
         Console.WriteLine("  owlmount mount --provider s3 --bucket my-bucket --prefix data/ --letter S");
@@ -503,6 +534,25 @@ static partial class Program
         ulong used = (ulong)Math.Max(GC.GetTotalMemory(forceFullCollection: false), 0L);
         ulong free = used >= total ? 0 : total - used;
         return (total, free);
+    }
+
+    static ulong? TryGetArchiveVolumeSize(string archivePath)
+    {
+        try
+        {
+            string fullArchivePath = Path.GetFullPath(archivePath);
+            string? root = Path.GetPathRoot(fullArchivePath);
+            if (string.IsNullOrWhiteSpace(root))
+                return null;
+
+            var drive = new DriveInfo(root);
+            long available = drive.AvailableFreeSpace;
+            return available > 0 ? (ulong)available : null;
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     static async Task<(ulong? TotalSize, ulong? FreeSize)> TryGetKuboRepositorySpaceAsync(IpfsClient client)
