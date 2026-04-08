@@ -230,6 +230,7 @@ static partial class Program
                     s3Config.ServiceURL = s3Endpoint;
                 var tlsFactory = new TlsHttpClientFactory();
                 s3Config.HttpClientFactory = tlsFactory;
+                s3Config.ForcePathStyle = true;
                 extraDisposable = tlsFactory;
 
                 IAmazonS3 s3Client = (s3Key, s3Secret) switch
