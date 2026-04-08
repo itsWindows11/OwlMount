@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
+using Amazon.Runtime;
 using Amazon.S3;
 using Ipfs.Http;
 using NfsSharp;
@@ -224,6 +225,7 @@ static partial class Program
                     s3Config.RegionEndpoint = Amazon.RegionEndpoint.GetBySystemName(s3Region);
                 if (!string.IsNullOrWhiteSpace(s3Endpoint))
                     s3Config.ServiceURL = s3Endpoint;
+                s3Config.HttpClientFactory = new TlsHttpClientFactory();
 
                 IAmazonS3 s3Client = (s3Key, s3Secret) switch
                 {
@@ -675,5 +677,33 @@ static partial class Program
         SetConsoleCtrlHandler(nint.Zero, false);
 
         return ok;
+    }
+
+    // ── S3 TLS helper ─────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Custom <see cref="Amazon.Runtime.HttpClientFactory"/> that creates an
+    /// <see cref="System.Net.Http.HttpClient"/> backed by a
+    /// <see cref="SocketsHttpHandler"/> with TLS 1.2 and 1.3 explicitly enabled.
+    /// This prevents the <c>HandshakeFailure</c> TLS alert that can occur with the
+    /// default AWSSDK v4 HTTP pipeline against standard S3 and S3-compatible endpoints.
+    /// </summary>
+    private sealed class TlsHttpClientFactory : HttpClientFactory
+    {
+        private readonly HttpClient _client = new(new SocketsHttpHandler
+        {
+            PooledConnectionLifetime = TimeSpan.FromMinutes(5),
+            SslOptions = new System.Net.Security.SslClientAuthenticationOptions
+            {
+                EnabledSslProtocols =
+                    System.Security.Authentication.SslProtocols.Tls12 |
+                    System.Security.Authentication.SslProtocols.Tls13,
+            },
+        });
+
+        public override HttpClient CreateHttpClient(IClientConfig config) => _client;
+        public override bool UseSDKHttpClientCaching(IClientConfig config)    => true;
+        public override bool DisposeHttpClientsAfterUse(IClientConfig config) => false;
+        public override string GetConfigUniqueString(IClientConfig config)    => "owlmount-tls";
     }
 }
