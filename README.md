@@ -19,6 +19,7 @@ Windows drive letter using [WinFsp](https://winfsp.dev).
 * **Directory cache** — short TTL (15 s default) per-folder listing cache for
   snappy Explorer browsing
 * **In-memory provider** — zero-config drive backed by `OwlCore.Storage.Memory`; great for testing and ephemeral scratch space
+* **Archive provider** — mount a local archive file as a browsable read-only drive
 
 ## Prerequisites
 
@@ -65,6 +66,7 @@ Pressing **Ctrl+C**, running `owlmount unmount --letter <X>` from another termin
 | `--provider` | Default access | Extra flags | Description |
 |---|---|---|---|
 | `memory` | Read/write | *(none)* | Empty in-memory filesystem (default; lives until process exits) |
+| `archive` | Read-only | `--archive-file <local-archive-path>` | Mount a local archive file as a browsable filesystem |
 | `kubo-mfs` | Read/write | `--path <mfs-path>` `[--api-url]` | Kubo MFS (Mutable File System) |
 | `kubo-ipfs` | Read-only | `--cid <CID>` `[--api-url]` | Immutable IPFS directory by CID |
 | `kubo-ipns` | Read/write | `--ipns <address>` `[--api-url]` | IPNS-addressed directory |
@@ -74,6 +76,8 @@ Pressing **Ctrl+C**, running `owlmount unmount --letter <X>` from another termin
 > Pass `--read-only` with any provider to suppress write support for that mount.
 >
 > Live folder refresh is enabled only for providers and folders that successfully expose `IFolderWatcher`; unsupported providers continue to rely on cache TTL and local invalidation.
+>
+> The `archive` provider is mounted read-only and reports volume capacity using the current free space on the local disk that stores the archive file.
 >
 > **OneDrive** is supported as a code-level provider (`OneDriveFolder` / `OneDriveFile` from `OwlCore.Storage.OneDrive`) but requires a pre-authenticated `GraphServiceClient` from MSAL — see the *Adding a custom provider* section.
 
@@ -94,6 +98,14 @@ owlmount unmount --letter R
 ```bat
 owlmount mount --provider memory --letter R --label "RAM Drive" --read-only
 ```
+
+### Example — archive file as `A:`
+
+```bat
+owlmount mount --provider archive --archive-file C:\data\backup.zip --letter A
+```
+
+Mounts the contents of a local archive file as a read-only drive.
 
 ### Example — Kubo MFS as `K:`
 
