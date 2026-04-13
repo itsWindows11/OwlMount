@@ -43,7 +43,7 @@ public sealed class OwlMountFileSystem : FileSystemBase
     /// </summary>
     private readonly ConcurrentDictionary<string, IFolder> _folderObjects =
         new(StringComparer.OrdinalIgnoreCase);
-    private readonly object _notifySync = new();
+    private readonly Lock _notifySync = new();
 
     private FileSystemHost? _host;
 
@@ -937,11 +937,10 @@ public sealed class OwlMountFileSystem : FileSystemBase
         IReadOnlyList<DirectoryEntry>? cached = _dirCache.TryGet(ctx.NormalizedPath);
         if (cached is not null) return cached;
 
-        List<IStorableChild> items = ctx.Folder
+        List<IStorableChild> items = [..ctx.Folder
             .GetItemsAsync()
             .ToBlockingEnumerable()
-            .OrderBy(x => x.Name, StringComparer.OrdinalIgnoreCase)
-            .ToList();
+            .OrderBy(x => x.Name, StringComparer.OrdinalIgnoreCase)];
 
         // Pre-compute child paths and cache sub-folders.
         var childPaths = new string[items.Count];
@@ -1317,9 +1316,7 @@ public sealed class OwlMountFileSystem : FileSystemBase
             switch (child)
             {
                 case IChildFile childFile:
-                    ModifiableFolderExtensions
-                        .MoveFromAsync(destinationFolderMod, childFile, sourceFolderMod, false, CancellationToken.None)
-                        .GetAwaiter().GetResult();
+                    destinationFolderMod.MoveFromAsync(childFile, sourceFolderMod, false, CancellationToken.None).GetAwaiter().GetResult();
                     break;
 
                 case IChildFolder childFolder when childFolder is IModifiableFolder childFolderMod:
