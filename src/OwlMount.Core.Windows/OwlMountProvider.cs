@@ -23,7 +23,7 @@ public sealed class OwlMountProvider : IRequiredCallbacks
 {
     private readonly IFolder _root;
     private readonly PathIndex _index;
-    private readonly BlockCache _blockCache;
+    private readonly BlockCache? _blockCache;
     private readonly RangeReaderRegistry _rangeReaders;
     private readonly SizeProviderRegistry _sizeProviders;
 
@@ -76,7 +76,7 @@ public sealed class OwlMountProvider : IRequiredCallbacks
 
     public OwlMountProvider(
         IFolder root,
-        BlockCache blockCache,
+        BlockCache? blockCache,
         RangeReaderRegistry rangeReaders,
         SizeProviderRegistry? sizeProviders = null,
         bool readOnly = false)
@@ -196,7 +196,7 @@ public sealed class OwlMountProvider : IRequiredCallbacks
         }
         catch
         {
-            entries = new List<DirectoryEntry>();
+            entries = [];
         }
 
         _enumerations[enumerationId] = new EnumerationState(entries);
@@ -326,9 +326,17 @@ public sealed class OwlMountProvider : IRequiredCallbacks
         try
         {
             byte[] tmp = new byte[alignedLength];
-            int read = _blockCache
-                .ReadAsync(file, reader, (long)alignedByteOffset, tmp.AsMemory(0, (int)alignedLength))
-                .GetAwaiter().GetResult();
+            int read;
+            if (_blockCache is not null)
+            {
+                read = _blockCache
+                    .ReadAsync(file, reader, (long)alignedByteOffset, tmp.AsMemory(0, (int)alignedLength))
+                    .GetAwaiter().GetResult();
+            }
+            else
+            {
+                read = reader.ReadAsync(file, (long)alignedByteOffset, tmp.AsMemory(0, (int)alignedLength)).GetAwaiter().GetResult();
+            }
 
             if (read > 0)
                 Marshal.Copy(tmp, 0, writeBuffer.Pointer, read);

@@ -1,4 +1,5 @@
 using OwlCore.Storage;
+using OwlCore.Storage.Memory;
 using OwlMount.Core.Abstractions;
 using OwlMount.Core.Cache;
 
@@ -28,7 +29,7 @@ public sealed class BlockCacheTests : IDisposable
         byte[] content = MakeContent(1000);
         var file   = new TestFile("f1", content);
         var reader = new TestRangeReader(content);
-        var cache  = new BlockCache("test", blockSize: 512, cacheDir: _tempDir);
+        var cache  = new BlockCache(new MemoryFolder(Guid.NewGuid().ToString("N"), "test-cache"), blockSize: 512);
 
         byte[] buffer = new byte[100];
         int read = await cache.ReadAsync(file, reader, offset: 0, buffer.AsMemory());
@@ -43,7 +44,7 @@ public sealed class BlockCacheTests : IDisposable
         byte[] content = MakeContent(1500);
         var file   = new TestFile("f2", content);
         var reader = new TestRangeReader(content);
-        var cache  = new BlockCache("test", blockSize: 512, cacheDir: _tempDir);
+        var cache  = new BlockCache(new MemoryFolder(Guid.NewGuid().ToString("N"), "test-cache"), blockSize: 512);
 
         // Request 600 bytes starting at offset 400 — crosses the 512-byte block boundary
         byte[] buffer = new byte[600];
@@ -59,7 +60,7 @@ public sealed class BlockCacheTests : IDisposable
         byte[] content = MakeContent(200);
         var file   = new TestFile("f3", content);
         var reader = new TestRangeReader(content);
-        var cache  = new BlockCache("test", blockSize: 512, cacheDir: _tempDir);
+        var cache  = new BlockCache(new MemoryFolder(Guid.NewGuid().ToString("N"), "test-cache"), blockSize: 512);
 
         byte[] buffer = new byte[512]; // bigger than file
         int read = await cache.ReadAsync(file, reader, offset: 0, buffer.AsMemory());
@@ -74,7 +75,7 @@ public sealed class BlockCacheTests : IDisposable
         byte[] content = MakeContent(100);
         var file   = new TestFile("f4", content);
         var reader = new TestRangeReader(content);
-        var cache  = new BlockCache("test", blockSize: 512, cacheDir: _tempDir);
+        var cache  = new BlockCache(new MemoryFolder(Guid.NewGuid().ToString("N"), "test-cache"), blockSize: 512);
 
         byte[] buffer = new byte[50];
         int read = await cache.ReadAsync(file, reader, offset: 100, buffer.AsMemory());
@@ -109,7 +110,7 @@ public sealed class BlockCacheTests : IDisposable
         byte[] content = MakeContent(512 * 3 + 100);
         var file   = new TestFile("f6", content);
         var reader = new TestRangeReader(content);
-        var cache  = new BlockCache("test", blockSize: 512, cacheDir: _tempDir);
+        var cache  = new BlockCache(new MemoryFolder(Guid.NewGuid().ToString("N"), "test-cache"), blockSize: 512);
 
         byte[] buffer = new byte[content.Length];
         int read = await cache.ReadAsync(file, reader, offset: 0, buffer.AsMemory());
@@ -124,7 +125,7 @@ public sealed class BlockCacheTests : IDisposable
         byte[] original = MakeContent(300);
         byte[] updated = [.. MakeContent(300).Reverse()];
         var file = new TestFile("f7", original);
-        var cache = new BlockCache("test", blockSize: 512, cacheDir: _tempDir);
+        var cache = new BlockCache(new MemoryFolder(Guid.NewGuid().ToString("N"), "test-cache"), blockSize: 512);
         var firstReader = new CountingRangeReader(original);
         var secondReader = new CountingRangeReader(updated);
 

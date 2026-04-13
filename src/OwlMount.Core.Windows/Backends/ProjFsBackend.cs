@@ -39,7 +39,7 @@ public sealed partial class ProjFsBackend : IOwlMountBackend
 
     public ProjFsBackend(
         IFolder root,
-        BlockCache blockCache,
+        BlockCache? blockCache,
         RangeReaderRegistry rangeReaders,
         SizeProviderRegistry? sizeProviders = null,
         bool readOnly = false)

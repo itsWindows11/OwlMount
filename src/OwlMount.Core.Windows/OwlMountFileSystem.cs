@@ -26,7 +26,7 @@ public sealed class OwlMountFileSystem : FileSystemBase
     private readonly IFolder _root;
     private readonly PathIndex _index;
     private readonly DirectoryCache _dirCache;
-    private readonly BlockCache _blockCache;
+    private readonly BlockCache? _blockCache;
     private readonly RangeReaderRegistry _rangeReaders;
     private readonly SizeProviderRegistry _sizeProviders;
     private readonly string _volumeLabel;
@@ -57,7 +57,7 @@ public sealed class OwlMountFileSystem : FileSystemBase
 
     public OwlMountFileSystem(
         IFolder root,
-        BlockCache blockCache,
+        BlockCache? blockCache,
         RangeReaderRegistry rangeReaders,
         SizeProviderRegistry? sizeProviders = null,
         bool readOnly = false,
@@ -226,9 +226,17 @@ public sealed class OwlMountFileSystem : FileSystemBase
         byte[] tmp = new byte[length];
         IRangeReader reader = _rangeReaders.GetReader(ctx.File);
 
-        int read = _blockCache
-            .ReadAsync(ctx.File, reader, (long)offset, tmp.AsMemory(0, (int)length))
-            .GetAwaiter().GetResult();
+        int read;
+        if (_blockCache is not null)
+        {
+            read = _blockCache
+                .ReadAsync(ctx.File, reader, (long)offset, tmp.AsMemory(0, (int)length))
+                .GetAwaiter().GetResult();
+        }
+        else
+        {
+            read = reader.ReadAsync(ctx.File, (long)offset, tmp.AsMemory(0, (int)length)).GetAwaiter().GetResult();
+        }
 
         if (read > 0)
             Marshal.Copy(tmp, 0, buffer, read);
@@ -1233,7 +1241,9 @@ public sealed class OwlMountFileSystem : FileSystemBase
         ctx.Entry.LastModifiedAt = now;
         ctx.Entry.LastAccessedAt = now;
         _index.AddOrUpdate(ctx.NormalizedPath, ctx.Entry);
-        _blockCache.Invalidate(ctx.File.Id);
+        _blockCache?.Invalidate(ctx.File.Id);
+        _index.AddOrUpdate(ctx.NormalizedPath, ctx.Entry);
+        _blockCache?.Invalidate(ctx.File.Id);
         _dirCache.Invalidate(GetParentPath(ctx.NormalizedPath));
     }
 
@@ -1243,7 +1253,7 @@ public sealed class OwlMountFileSystem : FileSystemBase
         _dirCache.InvalidateSubtree(normalizedPath);
         RemoveFolderObjectSubtree(normalizedPath);
         if (!string.IsNullOrWhiteSpace(fileId))
-            _blockCache.Invalidate(fileId);
+            _blockCache?.Invalidate(fileId);
     }
 
     private void RemoveFolderObjectSubtree(string normalizedPath)

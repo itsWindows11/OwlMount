@@ -312,7 +312,12 @@ static partial class Program
         // ── Build the VFS components ──────────────────────────────────────────
         var rangeReaders  = new RangeReaderRegistry();
         var sizeProviders = new SizeProviderRegistry();
-        var blockCache    = new BlockCache(providerId: $"{provider}_{root.Id}");
+        // For in-memory and local filesystem providers we don't need a disk-backed
+        // block cache — read directly from the provider. Create a cache only for
+        // providers that may benefit from on-disk caching.
+        BlockCache? blockCache = (provider == "memory" || provider == "local")
+            ? null
+            : new BlockCache(providerId: $"{provider}_{root.Id}");
 
         // Register provider-specific optimisations.
         // S3: use a HEAD request (GetObjectMetadata) to get file size rather than

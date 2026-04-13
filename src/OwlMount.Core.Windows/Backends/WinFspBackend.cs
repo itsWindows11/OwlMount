@@ -29,7 +29,7 @@ public sealed class WinFspBackend : IOwlMountBackend
 
     public WinFspBackend(
         IFolder root,
-        BlockCache blockCache,
+        BlockCache? blockCache,
         RangeReaderRegistry rangeReaders,
         SizeProviderRegistry? sizeProviders = null,
         bool readOnly = false,
