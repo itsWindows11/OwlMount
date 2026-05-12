@@ -1,5 +1,6 @@
 using System.Runtime.Versioning;
 using System.Text;
+using System.Text.Json;
 using OwlCore.Storage;
 using OwlMount.Core.Cache;
 using OwlMount.Core.Registry;
@@ -16,8 +17,17 @@ public sealed class MountService : IDisposable
 {
     private readonly Dictionary<string, ActiveMount> _mounts =
         new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, ProviderOptions> _mountConfigurations =
+        new(StringComparer.OrdinalIgnoreCase);
 
     private readonly object _lock = new();
+    private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
+    private const string ConfigurationFileName = "mount-configurations.json";
+
+    public MountService()
+    {
+        LoadConfigurationState();
+    }
 
     /// <summary>Raised on the thread that changed the mount collection.</summary>
     public event EventHandler? MountsChanged;
@@ -29,13 +39,26 @@ public sealed class MountService : IDisposable
     }
 
     /// <summary>
+    /// Gets whether mount-point configurations should be persisted to disk.
+    /// Defaults to <c>true</c>.
+    /// </summary>
+    public bool SaveMountPointConfigurations { get; private set; } = true;
+
+    /// <summary>Snapshot of current mount-point configurations in memory.</summary>
+    public IReadOnlyList<ProviderOptions> MountConfigurations
+    {
+        get { lock (_lock) { return [.. _mountConfigurations.Values]; } }
+    }
+
+    /// <summary>
     /// Builds the provider root and starts the VFS backend for <paramref name="opts"/>.
     /// Returns <c>(true, null)</c> on success, or <c>(false, errorMessage)</c> on failure.
     /// </summary>
     public async Task<(bool Success, string? Error)> MountAsync(
         ProviderOptions opts, CancellationToken ct = default)
     {
-        string letter = opts.Letter.TrimEnd(':').ToUpperInvariant();
+        ProviderOptions normalizedOpts = NormalizeOptions(opts);
+        string letter = normalizedOpts.Letter.TrimEnd(':').ToUpperInvariant();
         string mountPoint = letter + ":";
 
         lock (_lock)
@@ -48,7 +71,7 @@ public sealed class MountService : IDisposable
         ProviderCreationResult pr;
         try
         {
-            pr = await ProviderFactory.CreateAsync(opts, ct);
+            pr = await ProviderFactory.CreateAsync(normalizedOpts, ct);
         }
         catch (Exception ex)
         {
@@ -63,17 +86,17 @@ public sealed class MountService : IDisposable
             sizeProviders.Register(pr.SizePredicate, pr.SizeProvider);
 
         // Avoid disk cache overhead for in-memory and local providers.
-        BlockCache? blockCache = opts.Provider is "memory" or "local"
+        BlockCache? blockCache = normalizedOpts.Provider is "memory" or "local"
             ? null
-            : new BlockCache(providerId: $"{opts.Provider}_{pr.Root.Id}");
+            : new BlockCache(providerId: $"{normalizedOpts.Provider}_{pr.Root.Id}");
 
-        string resolvedLabel = opts.Label ?? DefaultLabel(opts.Provider);
+        string resolvedLabel = normalizedOpts.Label ?? DefaultLabel(normalizedOpts.Provider);
 
         // ── Create backend ─────────────────────────────────────────────────────
         IOwlMountBackend backend;
         try
         {
-            if (opts.Backend.Equals("projfs", StringComparison.OrdinalIgnoreCase))
+            if (normalizedOpts.Backend.Equals("projfs", StringComparison.OrdinalIgnoreCase))
             {
                 if (!OperatingSystem.IsWindowsVersionAtLeast(10, 0, 17763))
                 {
@@ -135,8 +158,8 @@ public sealed class MountService : IDisposable
         {
             DriveLetter = mountPoint,
             Label = resolvedLabel,
-            Provider = opts.Provider,
-            BackendName = opts.Backend,
+            Provider = normalizedOpts.Provider,
+            BackendName = normalizedOpts.Backend,
             IsReadOnly = isReadOnly,
             BackendInstance = backend,
             ExtraDisposable = pr.ExtraDisposable,
@@ -145,8 +168,13 @@ public sealed class MountService : IDisposable
         // Handle backend-initiated unmount (e.g. user ejects drive from Explorer).
         backend.Stopped += (_, _) => HandleExternalStop(letter);
 
-        lock (_lock) { _mounts[letter] = mount; }
+        lock (_lock)
+        {
+            _mounts[letter] = mount;
+            _mountConfigurations[letter] = normalizedOpts;
+        }
         MountsChanged?.Invoke(this, EventArgs.Empty);
+        PersistConfigurationState();
         return (true, null);
     }
 
@@ -159,9 +187,11 @@ public sealed class MountService : IDisposable
         {
             if (!_mounts.Remove(letter, out mount))
                 return;
+            _mountConfigurations.Remove(letter);
         }
         StopMount(mount);
         MountsChanged?.Invoke(this, EventArgs.Empty);
+        PersistConfigurationState();
     }
 
     /// <summary>Stops and removes all active mounts.</summary>
@@ -171,12 +201,17 @@ public sealed class MountService : IDisposable
         lock (_lock)
         {
             mounts = [.. _mounts.Values];
+            foreach (string letter in _mounts.Keys.ToArray())
+                _mountConfigurations.Remove(letter);
             _mounts.Clear();
         }
         foreach (ActiveMount m in mounts)
             StopMount(m);
         if (mounts.Count > 0)
+        {
             MountsChanged?.Invoke(this, EventArgs.Empty);
+            PersistConfigurationState();
+        }
     }
 
     /// <inheritdoc/>
@@ -192,10 +227,43 @@ public sealed class MountService : IDisposable
         {
             if (!_mounts.Remove(letter, out mount))
                 return;
+            _mountConfigurations.Remove(letter);
         }
         // Backend already stopped itself; only clean up extras.
         try { mount.ExtraDisposable?.Dispose(); } catch { /* best-effort */ }
         MountsChanged?.Invoke(this, EventArgs.Empty);
+        PersistConfigurationState();
+    }
+
+    /// <summary>Enables or disables persistence for mount-point configurations.</summary>
+    public void SetSaveMountPointConfigurations(bool enabled)
+    {
+        lock (_lock) { SaveMountPointConfigurations = enabled; }
+        PersistConfigurationState();
+    }
+
+    /// <summary>
+    /// Attempts to mount all currently known configurations.
+    /// Used at app startup to restore persisted mount points when enabled.
+    /// </summary>
+    public async Task<(int SuccessCount, IReadOnlyList<string> Failures)> RestoreConfiguredMountsAsync(
+        CancellationToken ct = default)
+    {
+        List<ProviderOptions> configs = [.. MountConfigurations];
+        int successCount = 0;
+        var failures = new List<string>();
+
+        foreach (ProviderOptions config in configs)
+        {
+            string letter = config.Letter.TrimEnd(':').ToUpperInvariant();
+            var (success, error) = await MountAsync(config, ct);
+            if (success)
+                successCount++;
+            else
+                failures.Add($"{letter}: {error ?? "Unknown error"}");
+        }
+
+        return (successCount, failures);
     }
 
     private static void StopMount(ActiveMount mount)
@@ -218,6 +286,113 @@ public sealed class MountService : IDisposable
             "NFS"       => "OwlMount (NFS)",
             _           => "OwlMount",
         };
+
+    private static ProviderOptions NormalizeOptions(ProviderOptions opts)
+    {
+        string provider = string.IsNullOrWhiteSpace(opts.Provider) ? "memory" : opts.Provider.Trim();
+        string backend = string.IsNullOrWhiteSpace(opts.Backend) ? "winfsp" : opts.Backend.Trim();
+        string letter = string.IsNullOrWhiteSpace(opts.Letter)
+            ? "M"
+            : opts.Letter.Trim().TrimEnd(':').ToUpperInvariant();
+
+        return new ProviderOptions
+        {
+            Provider = provider,
+            Backend = backend,
+            Letter = letter,
+            Label = opts.Label,
+            ForceReadOnly = opts.ForceReadOnly,
+            Path = opts.Path,
+            ArchiveFile = opts.ArchiveFile,
+            ApiUrl = opts.ApiUrl,
+            Cid = opts.Cid,
+            IpnsAddress = opts.IpnsAddress,
+            S3Bucket = opts.S3Bucket,
+            S3Prefix = opts.S3Prefix,
+            S3AccessKey = opts.S3AccessKey,
+            S3SecretKey = opts.S3SecretKey,
+            S3Region = opts.S3Region,
+            S3Endpoint = opts.S3Endpoint,
+            NfsHost = opts.NfsHost,
+            NfsExport = opts.NfsExport,
+            NfsPath = string.IsNullOrWhiteSpace(opts.NfsPath) ? "/" : opts.NfsPath,
+        };
+    }
+
+    private static string GetConfigurationFilePath()
+    {
+        string dir = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "OwlMount",
+            "WinUI");
+        return Path.Combine(dir, ConfigurationFileName);
+    }
+
+    private void LoadConfigurationState()
+    {
+        try
+        {
+            string path = GetConfigurationFilePath();
+            if (!File.Exists(path))
+                return;
+
+            string json = File.ReadAllText(path);
+            MountConfigurationState? state = JsonSerializer.Deserialize<MountConfigurationState>(json, JsonOptions);
+            if (state is null)
+                return;
+
+            SaveMountPointConfigurations = state.SaveMountPointConfigurations;
+            _mountConfigurations.Clear();
+
+            foreach (ProviderOptions opts in state.MountPoints)
+            {
+                ProviderOptions normalized = NormalizeOptions(opts);
+                string letter = normalized.Letter.TrimEnd(':').ToUpperInvariant();
+                if (!string.IsNullOrWhiteSpace(letter))
+                    _mountConfigurations[letter] = normalized;
+            }
+        }
+        catch
+        {
+            // best-effort load
+        }
+    }
+
+    private void PersistConfigurationState()
+    {
+        try
+        {
+            MountConfigurationState state;
+            lock (_lock)
+            {
+                state = new MountConfigurationState
+                {
+                    SaveMountPointConfigurations = SaveMountPointConfigurations,
+                    MountPoints = SaveMountPointConfigurations
+                        ? [.. _mountConfigurations.Values]
+                        : [],
+                };
+            }
+
+            string path = GetConfigurationFilePath();
+            string? dir = Path.GetDirectoryName(path);
+            if (!string.IsNullOrWhiteSpace(dir))
+                Directory.CreateDirectory(dir);
+
+            string json = JsonSerializer.Serialize(state, JsonOptions);
+            File.WriteAllText(path, json);
+        }
+        catch
+        {
+            // best-effort persistence
+        }
+    }
+}
+
+internal sealed class MountConfigurationState
+{
+    public bool SaveMountPointConfigurations { get; init; } = true;
+    public List<ProviderOptions> MountPoints { get; init; } = [];
 }
 
 /// <summary>Represents a single active in-process VFS mount.</summary>

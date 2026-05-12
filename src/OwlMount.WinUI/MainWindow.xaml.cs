@@ -26,20 +26,24 @@ public sealed partial class MainWindow : Window, INotifyPropertyChanged
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;
+    private bool _isInitializing;
 
     // ── Construction ──────────────────────────────────────────────────────────
 
     public MainWindow()
     {
         InitializeComponent();
+        _isInitializing = true;
 
         ProviderComboBox.SelectedIndex = 0;
         BackendComboBox.SelectedIndex = 0;
         DriveLettersTextBox.Text = "M";
         NfsPathTextBox.Text = "/";
+        SaveMountConfigurationsCheckBox.IsChecked = App.MountService.SaveMountPointConfigurations;
 
         RefreshMountsFromService();
         UpdateProviderPanels();
+        _isInitializing = false;
     }
 
     // ── Public API called by App ──────────────────────────────────────────────
@@ -179,10 +183,25 @@ public sealed partial class MainWindow : Window, INotifyPropertyChanged
     private void ExitButton_Click(object sender, RoutedEventArgs e) =>
         ((App)Current).ExitApp();
 
+    public void SetExternalStatus(string message) => SetStatus(message);
+
     // ── Provider panel visibility ─────────────────────────────────────────────
 
     private void ProviderComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e) =>
         UpdateProviderPanels();
+
+    private void SaveMountConfigurationsCheckBox_Changed(object sender, RoutedEventArgs e)
+    {
+        bool enabled = SaveMountConfigurationsCheckBox.IsChecked is true;
+        App.MountService.SetSaveMountPointConfigurations(enabled);
+
+        if (_isInitializing)
+            return;
+
+        SetStatus(enabled
+            ? "Mount point configurations will be saved."
+            : "Mount point configurations will remain in-memory only.");
+    }
 
     private void UpdateProviderPanels()
     {
@@ -228,4 +247,3 @@ public sealed partial class MainWindow : Window, INotifyPropertyChanged
 
 /// <summary>View model for a single row in the active-mounts list.</summary>
 public sealed record MountEntry(string DriveLetter, string Label, string Provider, string State);
-

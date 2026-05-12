@@ -151,6 +151,12 @@
                 </Grid>
 
                 <CheckBox x:Name="ReadOnlyCheckBox" Content="Read-only" />
+                <CheckBox
+                    x:Name="SaveMountConfigurationsCheckBox"
+                    Content="Save mount point configurations"
+                    IsChecked="True"
+                    Checked="SaveMountConfigurationsCheckBox_Changed"
+                    Unchecked="SaveMountConfigurationsCheckBox_Changed" />
 
                 <Expander x:Name="LocalOrArchiveExpander" Header="Local/Archive" HorizontalAlignment="Stretch" IsExpanded="True">
                     <StackPanel Spacing="8" Padding="0,8,0,0">

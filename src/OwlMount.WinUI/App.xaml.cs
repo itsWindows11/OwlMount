@@ -42,6 +42,7 @@ public partial class App : Application
         _window.Activate();
 
         StartTrayThread();
+        _ = RestoreConfiguredMountsAsync();
     }
 
     // Closing the window hides it to the tray instead of exiting.
@@ -168,6 +169,30 @@ public partial class App : Application
         });
     }
 
+    private async Task RestoreConfiguredMountsAsync()
+    {
+        var (successCount, failures) = await MountService.RestoreConfiguredMountsAsync();
+        if (_window is null)
+            return;
+
+        _window.DispatcherQueue.TryEnqueue(() =>
+        {
+            if (successCount > 0 && failures.Count == 0)
+            {
+                _window.SetExternalStatus($"Restored {successCount} saved mount point configuration(s).");
+            }
+            else if (successCount > 0 && failures.Count > 0)
+            {
+                _window.SetExternalStatus(
+                    $"Restored {successCount} saved mount point configuration(s); failures: {string.Join(" | ", failures)}");
+            }
+            else if (failures.Count > 0)
+            {
+                _window.SetExternalStatus($"Failed to restore saved mount point configurations: {string.Join(" | ", failures)}");
+            }
+        });
+    }
+
     /// <summary>
     /// Unmounts all drives, cleans up the tray icon, and terminates the process.
     /// Safe to call from any thread.
@@ -213,4 +238,3 @@ public partial class App : Application
         catch (ObjectDisposedException) { /* tray already torn down — ignore */ }
     }
 }
-
