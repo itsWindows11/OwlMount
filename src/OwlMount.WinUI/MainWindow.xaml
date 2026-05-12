@@ -89,8 +89,9 @@
 
                 <StackPanel Orientation="Horizontal" Spacing="10">
                     <Button Content="Mount" Click="MountButton_Click" />
-                    <Button Content="Refresh mounts" Click="RefreshButton_Click" />
+                    <Button Content="Refresh" Click="RefreshButton_Click" />
                     <Button Content="Unmount selected" Click="UnmountSelectedButton_Click" />
+                    <Button Content="Exit" Click="ExitButton_Click" />
                 </StackPanel>
 
                 <TextBlock Text="Active mounts" FontSize="18" FontWeight="SemiBold" />
@@ -99,19 +100,22 @@
                         <DataTemplate x:DataType="local:MountEntry">
                             <Grid ColumnSpacing="12">
                                 <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="80" />
-                                    <ColumnDefinition Width="120" />
+                                    <ColumnDefinition Width="60" />
+                                    <ColumnDefinition Width="160" />
+                                    <ColumnDefinition Width="100" />
                                     <ColumnDefinition Width="*" />
                                 </Grid.ColumnDefinitions>
                                 <TextBlock Grid.Column="0" Text="{x:Bind DriveLetter}" FontWeight="SemiBold" />
-                                <TextBlock Grid.Column="1" Text="{x:Bind ProcessId}" />
-                                <TextBlock Grid.Column="2" Text="{x:Bind State}" />
+                                <TextBlock Grid.Column="1" Text="{x:Bind Label}" />
+                                <TextBlock Grid.Column="2" Text="{x:Bind Provider}" />
+                                <TextBlock Grid.Column="3" Text="{x:Bind State}" />
                             </Grid>
                         </DataTemplate>
                     </ListView.ItemTemplate>
                 </ListView>
 
                 <TextBlock Text="{x:Bind StatusMessage, Mode=OneWay}" TextWrapping="Wrap" Opacity="0.85" />
+                <TextBlock Text="Tip: closing this window minimizes OwlMount to the system tray." Opacity="0.55" FontSize="12" />
             </StackPanel>
         </ScrollViewer>
     </Grid>
