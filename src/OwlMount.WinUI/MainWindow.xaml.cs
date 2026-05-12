@@ -264,4 +264,18 @@ public sealed partial class MainWindow : Window, INotifyPropertyChanged
 }
 
 /// <summary>View model for a single row in the active-mounts list.</summary>
-public sealed record MountEntry(string DriveLetter, string Label, string Provider, string State);
+public sealed class MountEntry
+{
+    public string DriveLetter { get; set; }
+    public string Label { get; set; }
+    public string Provider { get; set; }
+    public string State { get; set; }
+
+    public MountEntry(string driveLetter, string label, string provider, string state)
+    {
+        DriveLetter = driveLetter;
+        Label = label;
+        Provider = provider;
+        State = state;
+    }
+}
