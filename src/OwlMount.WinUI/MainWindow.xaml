@@ -4,6 +4,7 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:local="using:OwlMount.WinUI"
+    xmlns:controls="using:CommunityToolkit.WinUI.Controls"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     mc:Ignorable="d"
     Title="OwlMount">
@@ -41,6 +42,10 @@
         VisualStateManager drives three responsive breakpoints.
     -->
     <Grid x:Name="RootGrid">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
         <VisualStateManager.VisualStateGroups>
             <VisualStateGroup x:Name="LayoutStates">
 
@@ -84,20 +89,22 @@
             </VisualStateGroup>
         </VisualStateManager.VisualStateGroups>
 
+        <controls:TitleBar
+            Grid.Row="0"
+            Grid.ColumnSpan="2"
+            Title="OwlMount"
+            Subtitle="Mount OwlCore.Storage providers as Windows drive letters."
+            IsBackButtonVisible="False"
+            IsPaneButtonVisible="False" />
+
         <Grid.ColumnDefinitions>
             <ColumnDefinition x:Name="FormColumn" Width="*" MinWidth="280" />
             <ColumnDefinition x:Name="MountsPanelColumn" Width="0" />
         </Grid.ColumnDefinitions>
 
         <!-- ── Form column (always visible) ───────────────────────────────── -->
-        <ScrollViewer Grid.Column="0">
+        <ScrollViewer Grid.Row="1" Grid.Column="0">
             <StackPanel Spacing="16" Padding="20">
-                <TextBlock Text="OwlMount" FontSize="28" FontWeight="SemiBold" />
-                <TextBlock
-                    Text="Mount OwlCore.Storage providers as Windows drive letters."
-                    Opacity="0.75"
-                    TextWrapping="Wrap" />
-
                 <!-- Provider / backend options -->
                 <Grid ColumnSpacing="12" RowSpacing="10">
                     <Grid.ColumnDefinitions>
@@ -208,6 +215,7 @@
         <!-- ── Side mounts panel (wide mode only, MountsPanelColumn) ───────── -->
         <Grid
             x:Name="SideMountsPanel"
+            Grid.Row="1"
             Grid.Column="1"
             Visibility="Collapsed"
             Padding="12,20,20,20">
@@ -248,4 +256,3 @@
 
     </Grid>
 </Window>
-
