@@ -26,7 +26,7 @@ public sealed class MountService : IDisposable
     private const string ConfigurationFileName = "mount-configurations.json";
     private static readonly Regex InvalidFileNameCharsRegex =
         new($"[{Regex.Escape(new string(Path.GetInvalidFileNameChars()))}]",
-            RegexOptions.CultureInvariant | RegexOptions.Compiled);
+            RegexOptions.CultureInvariant);
 
     public MountService()
     {
@@ -313,13 +313,17 @@ public sealed class MountService : IDisposable
             return [];
 
         var failures = new List<string>();
-        Directory.CreateDirectory(targetBasePath);
+        string resolvedBasePath = Path.GetFullPath(targetBasePath);
+        Directory.CreateDirectory(resolvedBasePath);
 
         foreach ((string driveLetter, IFolder rootFolder) in memoryMounts)
         {
-            string mountDir = Path.Combine(targetBasePath, SanitizePathSegment(driveLetter.TrimEnd(':')));
+            string mountDir = Path.GetFullPath(
+                Path.Combine(resolvedBasePath, SanitizePathSegment(driveLetter.TrimEnd(':'))));
             try
             {
+                EnsurePathIsUnderBasePath(resolvedBasePath, mountDir);
+
                 if (Directory.Exists(mountDir))
                     Directory.Delete(mountDir, recursive: true);
 
@@ -437,9 +441,25 @@ public sealed class MountService : IDisposable
                     FileShare.None,
                     bufferSize: 81920,
                     useAsync: true);
-                await sourceStream.CopyToAsync(destinationStream, ct);
+                await sourceStream.CopyToAsync(destinationStream, 81920, ct);
             }
         }
+    }
+
+    private static void EnsurePathIsUnderBasePath(string basePath, string childPath)
+    {
+        string normalizedBasePath = Path.TrimEndingDirectorySeparator(basePath);
+        string baseWithSeparator = normalizedBasePath + Path.DirectorySeparatorChar;
+
+        bool isUnderBase = childPath.StartsWith(
+            baseWithSeparator,
+            OperatingSystem.IsWindows()
+                ? StringComparison.OrdinalIgnoreCase
+                : StringComparison.Ordinal);
+
+        if (!isUnderBase)
+            throw new InvalidOperationException(
+                $"Refusing to modify path outside configured export base path: {childPath}");
     }
 
     private void LoadConfigurationState()
