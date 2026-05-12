@@ -184,7 +184,7 @@ public sealed partial class MainWindow : Window, INotifyPropertyChanged
         RefreshMountsFromService();
 
     private void ExitButton_Click(object sender, RoutedEventArgs e) =>
-        ((App)Current).ExitApp();
+        ((App)Application.Current).ExitApp();
 
     public void SetExternalStatus(string message) => SetStatus(message);
 

@@ -113,7 +113,7 @@ public partial class App : Application
 
         var openItem = new WinForms.ToolStripMenuItem("Open OwlMount")
         {
-            Font = new Font(WinForms.ToolStripManager.DefaultFont, FontStyle.Bold),
+            Font = new Font(SystemFonts.DefaultFont, FontStyle.Bold),
         };
         openItem.Click += (_, _) => ShowWindow();
         menu.Items.Add(openItem);
