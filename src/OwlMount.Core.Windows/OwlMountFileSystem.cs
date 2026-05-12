@@ -576,7 +576,7 @@ public sealed class OwlMountFileSystem : FileSystemBase
         {
             if (fileNode is FolderContext dc)
             {
-                return dc.Folder.GetItemsAsync().ToBlockingEnumerable().Any()
+                return FolderHasAnyChildren(dc.Folder)
                     ? STATUS_DIRECTORY_NOT_EMPTY
                     : STATUS_SUCCESS;
             }
@@ -587,7 +587,7 @@ public sealed class OwlMountFileSystem : FileSystemBase
             IStorableChild? item = ResolveItem(normalizedPath);
 
             if (item is null) return STATUS_OBJECT_NAME_NOT_FOUND;
-            if (item is IFolder folder && folder.GetItemsAsync().ToBlockingEnumerable().Any())
+            if (item is IFolder folder && FolderHasAnyChildren(folder))
                 return STATUS_DIRECTORY_NOT_EMPTY;
 
             return STATUS_SUCCESS;
@@ -1315,6 +1315,19 @@ public sealed class OwlMountFileSystem : FileSystemBase
     {
         int slash = normalizedPath.LastIndexOf('/');
         return slash < 0 ? normalizedPath : normalizedPath[(slash + 1)..];
+    }
+
+    private static bool FolderHasAnyChildren(IFolder folder)
+    {
+        IAsyncEnumerator<IStorableChild> e = folder.GetItemsAsync().GetAsyncEnumerator();
+        try
+        {
+            return e.MoveNextAsync().AsTask().GetAwaiter().GetResult();
+        }
+        finally
+        {
+            e.DisposeAsync().AsTask().GetAwaiter().GetResult();
+        }
     }
 
     private string GetNormalizedPath(object fileNode, string fileName) =>
