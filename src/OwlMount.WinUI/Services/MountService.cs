@@ -21,7 +21,7 @@ public sealed class MountService : IDisposable
     private readonly Dictionary<string, ProviderOptions> _mountConfigurations =
         new(StringComparer.OrdinalIgnoreCase);
 
-    private readonly object _lock = new();
+    private readonly SemaphoreSlim _stateSemaphore = new(1, 1);
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
     private const string ConfigurationFileName = "mount-configurations.json";
     private static readonly Regex InvalidFileNameCharsRegex =
@@ -39,7 +39,12 @@ public sealed class MountService : IDisposable
     /// <summary>Snapshot of currently active mounts.</summary>
     public IReadOnlyList<ActiveMount> ActiveMounts
     {
-        get { lock (_lock) { return [.. _mounts.Values]; } }
+        get
+        {
+            _stateSemaphore.Wait();
+            try { return [.. _mounts.Values]; }
+            finally { _stateSemaphore.Release(); }
+        }
     }
 
     /// <summary>
@@ -51,7 +56,12 @@ public sealed class MountService : IDisposable
     /// <summary>Snapshot of current mount-point configurations in memory.</summary>
     public IReadOnlyList<ProviderOptions> MountConfigurations
     {
-        get { lock (_lock) { return [.. _mountConfigurations.Values]; } }
+        get
+        {
+            _stateSemaphore.Wait();
+            try { return [.. _mountConfigurations.Values]; }
+            finally { _stateSemaphore.Release(); }
+        }
     }
 
     /// <summary>
@@ -74,10 +84,15 @@ public sealed class MountService : IDisposable
         string letter = normalizedOpts.Letter.TrimEnd(':').ToUpperInvariant();
         string mountPoint = letter + ":";
 
-        lock (_lock)
+        await _stateSemaphore.WaitAsync(ct);
+        try
         {
             if (_mounts.ContainsKey(letter))
                 return (false, $"Drive {mountPoint} is already mounted by this application.");
+        }
+        finally
+        {
+            _stateSemaphore.Release();
         }
 
         // ── Build the IFolder root ─────────────────────────────────────────────
@@ -182,10 +197,15 @@ public sealed class MountService : IDisposable
         // Handle backend-initiated unmount (e.g. user ejects drive from Explorer).
         backend.Stopped += (_, _) => HandleExternalStop(letter);
 
-        lock (_lock)
+        await _stateSemaphore.WaitAsync(ct);
+        try
         {
             _mounts[letter] = mount;
             _mountConfigurations[letter] = normalizedOpts;
+        }
+        finally
+        {
+            _stateSemaphore.Release();
         }
         MountsChanged?.Invoke(this, EventArgs.Empty);
         PersistConfigurationState();
@@ -197,11 +217,16 @@ public sealed class MountService : IDisposable
     {
         letter = letter.TrimEnd(':').ToUpperInvariant();
         ActiveMount? mount;
-        lock (_lock)
+        _stateSemaphore.Wait();
+        try
         {
             if (!_mounts.Remove(letter, out mount))
                 return;
             _mountConfigurations.Remove(letter);
+        }
+        finally
+        {
+            _stateSemaphore.Release();
         }
         StopMount(mount);
         MountsChanged?.Invoke(this, EventArgs.Empty);
@@ -212,12 +237,17 @@ public sealed class MountService : IDisposable
     public void UnmountAll()
     {
         List<ActiveMount> mounts;
-        lock (_lock)
+        _stateSemaphore.Wait();
+        try
         {
             mounts = [.. _mounts.Values];
             foreach (string letter in _mounts.Keys.ToArray())
                 _mountConfigurations.Remove(letter);
             _mounts.Clear();
+        }
+        finally
+        {
+            _stateSemaphore.Release();
         }
         foreach (ActiveMount m in mounts)
             StopMount(m);
@@ -237,11 +267,16 @@ public sealed class MountService : IDisposable
     {
         letter = letter.TrimEnd(':').ToUpperInvariant();
         ActiveMount? mount;
-        lock (_lock)
+        _stateSemaphore.Wait();
+        try
         {
             if (!_mounts.Remove(letter, out mount))
                 return;
             _mountConfigurations.Remove(letter);
+        }
+        finally
+        {
+            _stateSemaphore.Release();
         }
         // Backend already stopped itself; only clean up extras.
         try { mount.ExtraDisposable?.Dispose(); } catch { /* best-effort */ }
@@ -252,17 +287,24 @@ public sealed class MountService : IDisposable
     /// <summary>Enables or disables persistence for mount-point configurations.</summary>
     public void SetSaveMountPointConfigurations(bool enabled)
     {
-        lock (_lock) { SaveMountPointConfigurations = enabled; }
+        _stateSemaphore.Wait();
+        try { SaveMountPointConfigurations = enabled; }
+        finally { _stateSemaphore.Release(); }
         PersistConfigurationState();
     }
 
     /// <summary>Updates in-memory filesystem persistence options.</summary>
     public void SetMemoryFileSystemPersistenceOptions(bool enabled, string? path)
     {
-        lock (_lock)
+        _stateSemaphore.Wait();
+        try
         {
             PersistMemoryFileSystemOnExit = enabled;
             MemoryFileSystemPersistPath = NormalizePersistPath(path);
+        }
+        finally
+        {
+            _stateSemaphore.Release();
         }
         PersistConfigurationState();
     }
@@ -300,13 +342,18 @@ public sealed class MountService : IDisposable
         string targetBasePath;
         List<(string DriveLetter, IFolder RootFolder)> memoryMounts;
 
-        lock (_lock)
+        _stateSemaphore.Wait();
+        try
         {
             enabled = PersistMemoryFileSystemOnExit;
             targetBasePath = MemoryFileSystemPersistPath;
             memoryMounts = [.. _mounts.Values
                 .Where(m => m.Provider.Equals("memory", StringComparison.OrdinalIgnoreCase))
                 .Select(m => (m.DriveLetter, m.RootFolder))];
+        }
+        finally
+        {
+            _stateSemaphore.Release();
         }
 
         if (!enabled || memoryMounts.Count == 0)
@@ -499,7 +546,8 @@ public sealed class MountService : IDisposable
         try
         {
             MountConfigurationState state;
-            lock (_lock)
+            _stateSemaphore.Wait();
+            try
             {
                 state = new MountConfigurationState
                 {
@@ -510,6 +558,10 @@ public sealed class MountService : IDisposable
                         ? [.. _mountConfigurations.Values]
                         : [],
                 };
+            }
+            finally
+            {
+                _stateSemaphore.Release();
             }
 
             string path = GetConfigurationFilePath();
