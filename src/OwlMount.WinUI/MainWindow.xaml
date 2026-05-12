@@ -9,31 +9,6 @@
     mc:Ignorable="d"
     Title="OwlMount">
 
-    <Window.Resources>
-        <!--
-            Shared DataTemplate for both the inline list (narrow/normal) and the
-            side panel (wide). Star columns keep it readable at any list width.
-        -->
-        <DataTemplate x:Key="MountItemTemplate" x:DataType="local:MountEntry">
-            <Grid ColumnSpacing="8">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="Auto" MinWidth="56" />
-                    <ColumnDefinition Width="2*" />
-                    <ColumnDefinition Width="Auto" MinWidth="70" />
-                    <ColumnDefinition Width="*" />
-                </Grid.ColumnDefinitions>
-                <!-- Disk icon + drive letter -->
-                <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
-                    <FontIcon Glyph="&#xE9C4;" FontSize="16" VerticalAlignment="Center" />
-                    <TextBlock Text="{x:Bind DriveLetter}" FontWeight="SemiBold" VerticalAlignment="Center" />
-                </StackPanel>
-                <TextBlock Grid.Column="1" Text="{x:Bind Label}" TextTrimming="CharacterEllipsis" />
-                <TextBlock Grid.Column="2" Text="{x:Bind Provider}" />
-                <TextBlock Grid.Column="3" Text="{x:Bind State}" Opacity="0.75" />
-            </Grid>
-        </DataTemplate>
-    </Window.Resources>
-
     <!--
         RootGrid has two columns:
           FormColumn   – always visible, contains the scrollable configuration form
@@ -42,6 +17,30 @@
         VisualStateManager drives three responsive breakpoints.
     -->
     <Grid x:Name="RootGrid">
+        <Grid.Resources>
+            <!--
+                Shared DataTemplate for both the inline list (narrow/normal) and the
+                side panel (wide). Star columns keep it readable at any list width.
+            -->
+            <DataTemplate x:Key="MountItemTemplate" x:DataType="local:MountEntry">
+                <Grid ColumnSpacing="8">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" MinWidth="56" />
+                        <ColumnDefinition Width="2*" />
+                        <ColumnDefinition Width="Auto" MinWidth="70" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <!-- Disk icon + drive letter -->
+                    <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                        <FontIcon Glyph="&#xE9C4;" FontSize="16" VerticalAlignment="Center" />
+                        <TextBlock Text="{x:Bind DriveLetter}" FontWeight="SemiBold" VerticalAlignment="Center" />
+                    </StackPanel>
+                    <TextBlock Grid.Column="1" Text="{x:Bind Label}" TextTrimming="CharacterEllipsis" />
+                    <TextBlock Grid.Column="2" Text="{x:Bind Provider}" />
+                    <TextBlock Grid.Column="3" Text="{x:Bind State}" Opacity="0.75" />
+                </Grid>
+            </DataTemplate>
+        </Grid.Resources>
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
