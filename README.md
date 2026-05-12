@@ -60,8 +60,9 @@ dotnet build src/OwlMount.WinUI/OwlMount.WinUI.csproj
 dotnet run --project src/OwlMount.WinUI/OwlMount.WinUI.csproj
 ```
 
-The GUI currently invokes the existing `owlmount` CLI under the hood, so backend/provider behavior stays aligned with the console app.
+The GUI performs all mount and unmount operations in-process via the shared `OwlMount.Core.Windows` library — no CLI subprocess is spawned.
 It supports mounting to multiple drive letters in one action by entering a comma-separated list.
+Closing the window minimizes the app to the system tray; right-click the tray icon to unmount drives or exit.
 
 ### Mount options
 
@@ -180,8 +181,9 @@ OwlMount.slnx
 │       ├── Contexts.cs               FileContext / FolderContext open-handle objects
 │       └── Program.cs                CLI entry point
 │   └── OwlMount.WinUI/               Windows-only WinUI 3 desktop app
-│       ├── MainWindow.xaml           GUI for mount, unmount, and active mounts
-│       └── MainWindow.xaml.cs        GUI logic + CLI orchestration
+│       ├── Services/                 In-process mount service + provider factory
+│       ├── MainWindow.xaml           Responsive GUI (narrow / normal / wide layouts)
+│       └── MainWindow.xaml.cs        GUI logic (in-process mount/unmount via MountService)
 └── tests/
     └── OwlMount.Tests/               Cross-platform xUnit tests
         ├── PathNormalizationTests.cs
