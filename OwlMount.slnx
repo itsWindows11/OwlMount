@@ -6,6 +6,7 @@
     <Project Path="src/OwlMount.Core.Windows/OwlMount.Core.Windows.csproj" />
     <Project Path="src/OwlMount.Core/OwlMount.Core.csproj" />
     <Project Path="src/OwlMount.WinFspHost/OwlMount.WinFspHost.csproj" />
+    <Project Path="src/OwlMount.WinUI/OwlMount.WinUI.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/OwlMount.Tests/OwlMount.Tests.csproj" />

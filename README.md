@@ -51,6 +51,17 @@ dotnet build
 owlmount mount --provider memory --letter R
 ```
 
+### WinUI 3 GUI
+
+A WinUI 3 desktop project is available at `src/OwlMount.WinUI/` for a GUI-based workflow with parity to the CLI mount/unmount/list flows.
+
+```bash
+dotnet build src/OwlMount.WinUI/OwlMount.WinUI.csproj
+dotnet run --project src/OwlMount.WinUI/OwlMount.WinUI.csproj
+```
+
+The GUI currently invokes the existing `owlmount` CLI under the hood, so backend/provider behavior stays aligned with the console app.
+
 ### Mount options
 
 | Flag | Default | Description |
@@ -167,6 +178,9 @@ OwlMount.slnx
 │       ├── DirectoryCache.cs         TTL-based per-folder listing cache
 │       ├── Contexts.cs               FileContext / FolderContext open-handle objects
 │       └── Program.cs                CLI entry point
+│   └── OwlMount.WinUI/               Windows-only WinUI 3 desktop app
+│       ├── MainWindow.xaml           GUI for mount, unmount, and active mounts
+│       └── MainWindow.xaml.cs        GUI logic + CLI orchestration
 └── tests/
     └── OwlMount.Tests/               Cross-platform xUnit tests
         ├── PathNormalizationTests.cs
