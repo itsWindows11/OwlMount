@@ -4,7 +4,6 @@ using Microsoft.Windows.ProjFS;
 using OwlCore.Storage;
 using OwlCore.Storage.Memory;
 using OwlCore.Storage.System.IO;
-using OwlMount.Core.Cache;
 using OwlMount.Core.Registry;
 using OwlMount.Core.Windows;
 
@@ -76,7 +75,6 @@ public sealed class FolderContractTests : IAsyncLifetime
     private SystemFolder?           _projected;
     private string?                 _localRoot;
     private string?                 _projFsRoot;
-    private string?                 _blockCacheDir;
     private VirtualizationInstance? _vi;
 
     // ── IAsyncLifetime ────────────────────────────────────────────────────────
@@ -136,10 +134,9 @@ public sealed class FolderContractTests : IAsyncLifetime
         // folder. If virtualization cannot be started or behaves unexpectedly in
         // the test environment, fall back to materializing the memory tree to a
         // regular temp directory so the contract tests can still run.
-        var blockCache    = new BlockCache(memRoot);
         var rangeReaders  = new RangeReaderRegistry();
         var sizeProviders = new SizeProviderRegistry();
-        var provider      = new OwlMountProvider(memRoot, blockCache, rangeReaders, sizeProviders);
+        var provider      = new OwlMountProvider(memRoot, null, rangeReaders, sizeProviders);
 
         _projFsRoot = TempDir("ProjFs");
 
@@ -235,7 +232,6 @@ public sealed class FolderContractTests : IAsyncLifetime
 
         TryDelete(_projFsRoot);
         TryDelete(_localRoot);
-        TryDelete(_blockCacheDir);
     }
 
     private static string TempDir(string tag) =>
