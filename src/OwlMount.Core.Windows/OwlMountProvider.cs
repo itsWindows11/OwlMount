@@ -102,7 +102,15 @@ public sealed class OwlMountProvider : IRequiredCallbacks
         uint triggeringProcessId, string triggeringProcessImageFileName)
     {
         string norm = NormalizeProjFsPath(relativePath);
-        IFolder? folder = string.IsNullOrEmpty(norm) ? _root : ResolveFolder(norm);
+        IFolder? folder;
+        try
+        {
+            folder = string.IsNullOrEmpty(norm) ? _root : ResolveFolder(norm);
+        }
+        catch
+        {
+            folder = null;
+        }
         if (folder is null) return HResult.FileNotFound;
 
         List<DirectoryEntry> entries;
@@ -467,7 +475,7 @@ public sealed class OwlMountProvider : IRequiredCallbacks
         {
             return folder.GetFirstByNameAsync(name).GetAwaiter().GetResult();
         }
-        catch (FileNotFoundException)
+        catch
         {
             return null;
         }
@@ -665,6 +673,23 @@ public sealed class OwlMountProvider : IRequiredCallbacks
             mf.DeleteAsync(child).GetAwaiter().GetResult();
         }
         catch { /* best-effort */ }
+
+        // Invalidate caches regardless of whether the backing-store delete succeeded,
+        // so stale entries never cause GetPlaceholderInfoCallback to recreate a
+        // placeholder (which would make a deleted folder reappear) or cause
+        // StartDirectoryEnumerationCallback to use a stale IFolder reference and
+        // return HResult.InternalError — both manifest as MS-DOS errors to the user.
+        _index.RemoveSubtree(normalizedPath);
+        _folderObjects.TryRemove(normalizedPath, out _);
+        if (isDirectory)
+        {
+            string prefix = normalizedPath + "/";
+            foreach (string key in _folderObjects.Keys.ToArray())
+            {
+                if (key.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                    _folderObjects.TryRemove(key, out _);
+            }
+        }
     }
 
     private void TryRenameInBackingStore(string oldNorm, string newNorm, bool isDirectory)
