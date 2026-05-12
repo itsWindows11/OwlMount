@@ -32,7 +32,7 @@
                     </Grid.ColumnDefinitions>
                     <!-- Disk icon + drive letter -->
                     <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
-                        <FontIcon Glyph="&#xE9C4;" FontSize="16" VerticalAlignment="Center" />
+                        <SymbolIcon Symbol="SaveLocal" />
                         <TextBlock Text="{x:Bind DriveLetter}" FontWeight="SemiBold" VerticalAlignment="Center" />
                     </StackPanel>
                     <TextBlock Grid.Column="1" Text="{x:Bind Label}" TextTrimming="CharacterEllipsis" />
@@ -94,6 +94,7 @@
         </Grid.ColumnDefinitions>
 
         <controls:TitleBar
+            x:Name="AppTitleBar"
             Grid.Row="0"
             Grid.ColumnSpan="2"
             Title="OwlMount"
