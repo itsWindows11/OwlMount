@@ -14,6 +14,7 @@ public sealed partial class MainWindow : Window
     {
         ViewModel = new MainWindowViewModel(App.MountService, () => ((App)Application.Current).ExitApp());
         InitializeComponent();
+        ViewModel.SetS3SecretProvider(() => S3SecretKeyTextBox.Password);
         ExtendsContentIntoTitleBar = true;
         SetTitleBar(AppTitleBar);
         SystemBackdrop = new MicaBackdrop { Kind = MicaKind.BaseAlt };
@@ -46,10 +47,4 @@ public sealed partial class MainWindow : Window
     }
 
     public void SetExternalStatus(string message) => ViewModel.SetStatus(message);
-
-    private void S3SecretKeyTextBox_PasswordChanged(object sender, RoutedEventArgs e)
-    {
-        if (sender is PasswordBox passwordBox)
-            ViewModel.S3SecretKey = passwordBox.Password;
-    }
 }
