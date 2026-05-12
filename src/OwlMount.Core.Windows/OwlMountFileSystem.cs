@@ -1322,11 +1322,11 @@ public sealed class OwlMountFileSystem : FileSystemBase
         IAsyncEnumerator<IStorableChild> e = folder.GetItemsAsync().GetAsyncEnumerator();
         try
         {
-            return e.MoveNextAsync().AsTask().GetAwaiter().GetResult();
+            return e.MoveNextAsync().ConfigureAwait(false).GetAwaiter().GetResult();
         }
         finally
         {
-            e.DisposeAsync().AsTask().GetAwaiter().GetResult();
+            e.DisposeAsync().ConfigureAwait(false).GetAwaiter().GetResult();
         }
     }
 
