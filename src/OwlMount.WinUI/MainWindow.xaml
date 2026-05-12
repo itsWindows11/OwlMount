@@ -89,6 +89,11 @@
             </VisualStateGroup>
         </VisualStateManager.VisualStateGroups>
 
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition x:Name="FormColumn" Width="*" MinWidth="280" />
+            <ColumnDefinition x:Name="MountsPanelColumn" Width="0" />
+        </Grid.ColumnDefinitions>
+
         <controls:TitleBar
             Grid.Row="0"
             Grid.ColumnSpan="2"
@@ -96,11 +101,6 @@
             Subtitle="Mount OwlCore.Storage providers as Windows drive letters."
             IsBackButtonVisible="False"
             IsPaneButtonVisible="False" />
-
-        <Grid.ColumnDefinitions>
-            <ColumnDefinition x:Name="FormColumn" Width="*" MinWidth="280" />
-            <ColumnDefinition x:Name="MountsPanelColumn" Width="0" />
-        </Grid.ColumnDefinitions>
 
         <!-- ── Form column (always visible) ───────────────────────────────── -->
         <ScrollViewer Grid.Row="1" Grid.Column="0">
