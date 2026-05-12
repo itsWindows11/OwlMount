@@ -18,7 +18,8 @@ namespace OwlMount.Core.Cache;
 public sealed class BlockCache : IDisposable
 {
     private readonly int _blockSize;
-    private readonly string _cacheDir;
+    private readonly string? _cacheDir;
+    private readonly IBlockCacheStore _store;
     private readonly ConcurrentDictionary<string, Task<byte[]>> _inflight = new();
 
     /// <param name="providerId">
@@ -35,7 +36,18 @@ public sealed class BlockCache : IDisposable
         _cacheDir = cacheDir ?? Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "OwlMount", "Cache", SanitizeName(providerId));
-        Directory.CreateDirectory(_cacheDir);
+        _store = new FileSystemBlockCacheStore(_cacheDir);
+    }
+
+    /// <summary>
+    /// Create a BlockCache that stores cache files inside the provided OwlCore.Storage folder.
+    /// This is useful for in-memory or provider-backed cache roots.
+    /// </summary>
+    public BlockCache(IModifiableFolder cacheFolder, int blockSize = 256 * 1024)
+    {
+        _blockSize = blockSize;
+        _cacheDir = null;
+        _store = new OwlCoreFolderBlockCacheStore(cacheFolder);
     }
 
     /// <summary>
@@ -68,7 +80,7 @@ public sealed class BlockCache : IDisposable
             int canRead = Math.Min(toRead, block.Length - blockOffset);
             if (canRead <= 0) break; // EOF
 
-            block.AsMemory(blockOffset, canRead).CopyTo(destination.Slice(totalRead));
+            block.AsMemory(blockOffset, canRead).CopyTo(destination[totalRead..]);
             totalRead += canRead;
             remaining -= canRead;
             pos += canRead;
@@ -86,13 +98,13 @@ public sealed class BlockCache : IDisposable
         long blockIndex,
         CancellationToken ct)
     {
-        string blockPath = Path.Combine(_cacheDir, $"{fileKey}_{blockIndex}.blk");
+        string fileName = $"{fileKey}_{blockIndex}.blk";
 
-        if (File.Exists(blockPath))
+        if (await _store.ExistsAsync(fileName, ct).ConfigureAwait(false))
         {
             try
             {
-                return await File.ReadAllBytesAsync(blockPath, ct);
+                return await _store.ReadAllBytesAsync(fileName, ct).ConfigureAwait(false);
             }
             catch
             {
@@ -102,7 +114,7 @@ public sealed class BlockCache : IDisposable
 
         string inflightKey = $"{fileKey}_{blockIndex}";
         Task<byte[]> task = _inflight.GetOrAdd(inflightKey,
-            _ => FetchBlockAsync(file, reader, blockIndex, blockPath, ct));
+            _ => FetchBlockAsync(file, reader, fileKey, blockIndex, ct));
 
         try
         {
@@ -117,8 +129,8 @@ public sealed class BlockCache : IDisposable
     private async Task<byte[]> FetchBlockAsync(
         IFile file,
         IRangeReader reader,
+        string fileKey,
         long blockIndex,
-        string blockPath,
         CancellationToken ct)
     {
         long offset = blockIndex * _blockSize;
@@ -128,9 +140,8 @@ public sealed class BlockCache : IDisposable
         byte[] actual = totalRead < _blockSize ? buffer[..totalRead] : buffer;
 
         // Write to cache atomically via a temp file + rename.
-        string tmpPath = blockPath + ".tmp";
-        await File.WriteAllBytesAsync(tmpPath, actual, ct);
-        File.Move(tmpPath, blockPath, overwrite: true);
+        string fileName = $"{fileKey}_{blockIndex}.blk";
+        await _store.WriteAllBytesAtomicAsync(fileName, actual, ct).ConfigureAwait(false);
 
         return actual;
     }
@@ -149,17 +160,20 @@ public sealed class BlockCache : IDisposable
     }
 
     /// <summary>
-    /// Removes all cached blocks for <paramref name="fileId"/>.
+    /// Removes all on-disk cache blocks for the file identified by <paramref name="fileId"/>.
+    /// This is a best-effort operation; individual delete failures are silently ignored.
     /// </summary>
     public void Invalidate(string fileId)
     {
         string fileKey = ComputeFileKey(fileId);
-        string pattern = $"{fileKey}_*.blk";
-
-        foreach (string path in Directory.EnumerateFiles(_cacheDir, pattern))
+        try
         {
-            try { File.Delete(path); } catch { /* best-effort */ }
+            foreach (string name in _store.EnumerateFiles(fileKey))
+            {
+                try { _store.Delete(name); } catch { /* best-effort */ }
+            }
         }
+        catch { /* directory may not exist */ }
     }
 
     public void Dispose() { }

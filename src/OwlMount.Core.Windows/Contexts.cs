@@ -1,7 +1,7 @@
 using OwlCore.Storage;
 using OwlMount.Core.Abstractions;
 
-namespace OwlMount.WinFspHost;
+namespace OwlMount.Core.Windows;
 
 /// <summary>Context object for an open file handle.</summary>
 internal sealed class FileContext : IDisposable

@@ -24,20 +24,21 @@ public sealed class PathIndex
     public void Remove(string normalizedPath) =>
         _entries.TryRemove(normalizedPath, out _);
 
-    /// <summary>Removes the entry at <paramref name="normalizedPath"/> and any descendants.</summary>
+    /// <summary>
+    /// Removes the entry at <paramref name="normalizedPath"/> and all entries
+    /// whose paths begin with <c><paramref name="normalizedPath"/>/</c>.
+    /// </summary>
     public void RemoveSubtree(string normalizedPath)
     {
-        string prefix = string.IsNullOrEmpty(normalizedPath)
-            ? string.Empty
-            : normalizedPath + "/";
+        _entries.TryRemove(normalizedPath, out _);
 
+        if (string.IsNullOrEmpty(normalizedPath)) return;
+
+        string prefix = normalizedPath + "/";
         foreach (string key in _entries.Keys)
         {
-            if (key.Equals(normalizedPath, StringComparison.OrdinalIgnoreCase) ||
-                (!string.IsNullOrEmpty(prefix) && key.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)))
-            {
+            if (key.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
                 _entries.TryRemove(key, out _);
-            }
         }
     }
 

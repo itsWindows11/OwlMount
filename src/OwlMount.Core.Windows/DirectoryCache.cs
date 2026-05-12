@@ -1,6 +1,6 @@
 using System.Collections.Concurrent;
 
-namespace OwlMount.WinFspHost;
+namespace OwlMount.Core.Windows;
 
 /// <summary>
 /// A short-lived cache of directory listings keyed by normalized VFS path.

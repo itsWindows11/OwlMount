@@ -12,7 +12,7 @@ using OwlMount.Core.Index;
 using OwlMount.Core.Registry;
 using FileInfo = Fsp.Interop.FileInfo;
 
-namespace OwlMount.WinFspHost;
+namespace OwlMount.Core.Windows;
 
 /// <summary>
 /// WinFsp <see cref="FileSystemBase"/> implementation that exposes an
@@ -26,7 +26,7 @@ public sealed class OwlMountFileSystem : FileSystemBase
     private readonly IFolder _root;
     private readonly PathIndex _index;
     private readonly DirectoryCache _dirCache;
-    private readonly BlockCache _blockCache;
+    private readonly BlockCache? _blockCache;
     private readonly RangeReaderRegistry _rangeReaders;
     private readonly SizeProviderRegistry _sizeProviders;
     private readonly string _volumeLabel;
@@ -35,7 +35,15 @@ public sealed class OwlMountFileSystem : FileSystemBase
     private readonly ulong _freeSize;
     private readonly ConcurrentDictionary<string, WatchedFolder> _watchedFolders =
         new(StringComparer.OrdinalIgnoreCase);
-    private readonly object _notifySync = new();
+    /// <summary>
+    /// Cache of resolved <see cref="IFolder"/> objects keyed by normalized path.
+    /// Populated during directory listing and path traversal so that
+    /// <see cref="ResolveFile"/> and <see cref="ResolveFolder"/> can start from the
+    /// deepest known ancestor instead of re-traversing from root on every call.
+    /// </summary>
+    private readonly ConcurrentDictionary<string, IFolder> _folderObjects =
+        new(StringComparer.OrdinalIgnoreCase);
+    private readonly Lock _notifySync = new();
 
     private FileSystemHost? _host;
 
@@ -49,7 +57,7 @@ public sealed class OwlMountFileSystem : FileSystemBase
 
     public OwlMountFileSystem(
         IFolder root,
-        BlockCache blockCache,
+        BlockCache? blockCache,
         RangeReaderRegistry rangeReaders,
         SizeProviderRegistry? sizeProviders = null,
         bool readOnly = false,
@@ -69,6 +77,7 @@ public sealed class OwlMountFileSystem : FileSystemBase
         _isReadOnly = readOnly || root is not IModifiableFolder;
         _totalSize = totalSize.GetValueOrDefault(DefaultVolumeSize);
         _freeSize = _isReadOnly ? 0 : Math.Min(freeSize ?? _totalSize, _totalSize);
+        _folderObjects[string.Empty] = root; // seed the cache with the root
     }
 
     // ── Lifecycle ─────────────────────────────────────────────────────────────
@@ -102,6 +111,7 @@ public sealed class OwlMountFileSystem : FileSystemBase
             watcher.Dispose();
 
         _watchedFolders.Clear();
+        _folderObjects.Clear();
         _host = null;
         base.Unmounted(host);
     }
@@ -186,6 +196,7 @@ public sealed class OwlMountFileSystem : FileSystemBase
             IFolder? folder = ResolveFolder(norm);
             if (folder is null) return STATUS_OBJECT_NAME_NOT_FOUND;
             EnsureFolderWatcher(folder, norm);
+            _folderObjects.TryAdd(norm, folder);
             fileNode = new FolderContext(folder, norm);
             FillFolderInfo(ref fileInfo, entry);
         }
@@ -215,9 +226,17 @@ public sealed class OwlMountFileSystem : FileSystemBase
         byte[] tmp = new byte[length];
         IRangeReader reader = _rangeReaders.GetReader(ctx.File);
 
-        int read = _blockCache
-            .ReadAsync(ctx.File, reader, (long)offset, tmp.AsMemory(0, (int)length))
-            .GetAwaiter().GetResult();
+        int read;
+        if (_blockCache is not null)
+        {
+            read = _blockCache
+                .ReadAsync(ctx.File, reader, (long)offset, tmp.AsMemory(0, (int)length))
+                .GetAwaiter().GetResult();
+        }
+        else
+        {
+            read = reader.ReadAsync(ctx.File, (long)offset, tmp.AsMemory(0, (int)length)).GetAwaiter().GetResult();
+        }
 
         if (read > 0)
             Marshal.Copy(tmp, 0, buffer, read);
@@ -545,6 +564,40 @@ public sealed class OwlMountFileSystem : FileSystemBase
         }
     }
 
+    public override int CanDelete(object fileNode, object fileDesc, string fileName)
+    {
+        if (_isReadOnly) return STATUS_MEDIA_WRITE_PROTECTED;
+
+        string normalizedPath = GetNormalizedPath(fileNode, fileName);
+        if (string.IsNullOrEmpty(normalizedPath))
+            return STATUS_ACCESS_DENIED;
+
+        try
+        {
+            if (fileNode is FolderContext dc)
+            {
+                return FolderHasAnyChildren(dc.Folder)
+                    ? STATUS_DIRECTORY_NOT_EMPTY
+                    : STATUS_SUCCESS;
+            }
+
+            if (fileNode is FileContext)
+                return STATUS_SUCCESS;
+
+            IStorableChild? item = ResolveItem(normalizedPath);
+
+            if (item is null) return STATUS_OBJECT_NAME_NOT_FOUND;
+            if (item is IFolder folder && FolderHasAnyChildren(folder))
+                return STATUS_DIRECTORY_NOT_EMPTY;
+
+            return STATUS_SUCCESS;
+        }
+        catch (Exception ex)
+        {
+            return HandleWriteFailure("can-delete", normalizedPath, ex, STATUS_UNEXPECTED_IO_ERROR);
+        }
+    }
+
     public override void Cleanup(object fileNode, object fileDesc, string fileName, uint flags)
     {
         if (_isReadOnly || (flags & CleanupDelete) == 0)
@@ -554,20 +607,25 @@ public sealed class OwlMountFileSystem : FileSystemBase
         if (string.IsNullOrEmpty(normalizedPath))
             return;
 
-        string parentPath = GetParentPath(normalizedPath);
-        IFolder? parent = ResolveFolderOrRoot(parentPath);
-        if (parent is not IModifiableFolder modifiableParent)
-            return;
-
-        IStorableChild? child = GetChild(parent, GetLeafName(normalizedPath));
-        if (child is null)
-            return;
-
-        if (fileNode is FileContext fc)
-            fc.DisposeWriteStream();
-
         try
         {
+            string parentPath = GetParentPath(normalizedPath);
+            IFolder? parent = ResolveFolderOrRoot(parentPath);
+            if (parent is not IModifiableFolder modifiableParent)
+                return;
+
+            IStorableChild? child = GetChild(parent, GetLeafName(normalizedPath));
+            if (child is null)
+            {
+                RemoveFolderWatchers(normalizedPath);
+                InvalidatePath(normalizedPath);
+                _dirCache.Invalidate(parentPath);
+                return;
+            }
+
+            if (fileNode is FileContext fc)
+                fc.DisposeWriteStream();
+
             modifiableParent.DeleteAsync(child).GetAwaiter().GetResult();
             RemoveFolderWatchers(normalizedPath);
             InvalidatePath(normalizedPath, child.Id);
@@ -926,34 +984,85 @@ public sealed class OwlMountFileSystem : FileSystemBase
         IReadOnlyList<DirectoryEntry>? cached = _dirCache.TryGet(ctx.NormalizedPath);
         if (cached is not null) return cached;
 
-        List<IStorableChild> items = ctx.Folder
+        List<IStorableChild> items = [..ctx.Folder
             .GetItemsAsync()
             .ToBlockingEnumerable()
-            .OrderBy(x => x.Name, StringComparer.OrdinalIgnoreCase)
-            .ToList();
+            .OrderBy(x => x.Name, StringComparer.OrdinalIgnoreCase)];
+
+        // Pre-compute child paths and cache sub-folders.
+        var childPaths = new string[items.Count];
+        for (int i = 0; i < items.Count; i++)
+        {
+            childPaths[i] = CombineNormalizedPath(ctx.NormalizedPath, items[i].Name);
+            if (items[i] is IFolder childFolder)
+            {
+                EnsureFolderWatcher(childFolder, childPaths[i]);
+                _folderObjects.TryAdd(childPaths[i], childFolder);
+            }
+        }
+
+        // Fetch file sizes using the provider's fastpath (e.g. S3 HEAD, NFS stat),
+        // running all requests in parallel so the total latency is bounded by the
+        // slowest individual call rather than the sum of all calls.
+        const int MaxSizeConcurrency = 8;
+        using var semaphore = new SemaphoreSlim(MaxSizeConcurrency, MaxSizeConcurrency);
+
+        var sizeTasks = new Task<long?>[items.Count];
+        for (int i = 0; i < items.Count; i++)
+        {
+            if (items[i] is not IFile file)
+            {
+                sizeTasks[i] = Task.FromResult<long?>(null);
+                continue;
+            }
+
+            // Re-use a size already cached in the index (e.g. from a prior Open).
+            if (_index.TryGet(childPaths[i]) is { Size: long indexedSize })
+            {
+                sizeTasks[i] = Task.FromResult<long?>(indexedSize);
+                continue;
+            }
+
+            var capturedFile = file;
+            var capturedPath = childPaths[i];
+            sizeTasks[i] = Task.Run(async () =>
+            {
+                await semaphore.WaitAsync(CancellationToken.None);
+                try
+                {
+                    return await _sizeProviders.GetProvider(capturedFile).GetSizeAsync(capturedFile);
+                }
+                catch
+                {
+                    return (long?)null;
+                }
+                finally
+                {
+                    semaphore.Release();
+                }
+            });
+        }
+
+        // WinFsp callbacks run on dedicated WinFsp threadpool threads with no
+        // SynchronizationContext, so blocking here does not risk a deadlock.
+        long?[] sizes = Task.WhenAll(sizeTasks).GetAwaiter().GetResult();
 
         List<DirectoryEntry> result = new(items.Count);
-        foreach (IStorableChild item in items)
+        for (int i = 0; i < items.Count; i++)
         {
+            IStorableChild item = items[i];
             bool isDir = item is IFolder;
             DateTimeOffset? created = GetCreatedAt(item);
             DateTimeOffset? accessed = GetLastAccessedAt(item);
             DateTimeOffset? modified = GetLastModifiedAt(item);
+            long? size = sizes[i];
 
-            string childPath = CombineNormalizedPath(ctx.NormalizedPath, item.Name);
-            if (item is IFolder childFolder)
-                EnsureFolderWatcher(childFolder, childPath);
-
-            long? knownSize = item is IFile file
-                ? TryGetFileSize(file, childPath)
-                : null;
-
-            _index.AddOrUpdate(childPath, new PathIndexEntry
+            _index.AddOrUpdate(childPaths[i], new PathIndexEntry
             {
                 Id = item.Id,
                 Name = item.Name,
                 IsFile = !isDir,
-                Size = knownSize,
+                Size = size,
                 CreatedAt = created == DateTimeOffset.MinValue ? null : created,
                 LastModifiedAt = modified == DateTimeOffset.MinValue ? null : modified,
                 LastAccessedAt = accessed == DateTimeOffset.MinValue ? null : accessed,
@@ -962,7 +1071,7 @@ public sealed class OwlMountFileSystem : FileSystemBase
             result.Add(new DirectoryEntry(
                 item.Name,
                 isDir,
-                knownSize ?? 0,
+                size ?? 0,
                 created ?? DateTimeOffset.UnixEpoch,
                 accessed ?? DateTimeOffset.UnixEpoch,
                 modified ?? DateTimeOffset.UnixEpoch));
@@ -994,13 +1103,26 @@ public sealed class OwlMountFileSystem : FileSystemBase
     private PathIndexEntry? ResolveAndIndex(string normalizedPath)
     {
         string[] segments = normalizedPath.Split('/');
-        IFolder current = _root;
+        string parentPath = GetParentPath(normalizedPath);
 
-        for (int i = 0; i < segments.Length - 1; i++)
+        // Use cached parent folder to skip intermediate traversal
+        IFolder current;
+        if (_folderObjects.TryGetValue(parentPath, out IFolder? cachedParent))
         {
-            IFolder? sub = GetChildFolder(current, segments[i]);
-            if (sub is null) return null;
-            current = sub;
+            current = cachedParent;
+        }
+        else
+        {
+            current = _root;
+            string currPath = string.Empty;
+            for (int i = 0; i < segments.Length - 1; i++)
+            {
+                IFolder? sub = GetChildFolder(current, segments[i]);
+                if (sub is null) return null;
+                current = sub;
+                currPath = CombineNormalizedPath(currPath, segments[i]);
+                _folderObjects.TryAdd(currPath, current);
+            }
         }
 
         string lastName = segments[^1];
@@ -1008,9 +1130,13 @@ public sealed class OwlMountFileSystem : FileSystemBase
         if (child is null) return null;
 
         if (child is IFolder folder)
+        {
             EnsureFolderWatcher(folder, normalizedPath);
+            _folderObjects.TryAdd(normalizedPath, folder);
+        }
 
-        PathIndexEntry entry = CreateEntry(child, child is IFile file ? TryGetFileSize(file, normalizedPath) : null);
+        // Size is resolved lazily on first Open() to avoid a network call here.
+        PathIndexEntry entry = CreateEntry(child, knownSize: null);
         _index.AddOrUpdate(normalizedPath, entry);
         return entry;
     }
@@ -1018,13 +1144,22 @@ public sealed class OwlMountFileSystem : FileSystemBase
     private IFile? ResolveFile(string normalizedPath)
     {
         string[] segments = normalizedPath.Split('/');
-        IFolder current = _root;
+        string parentPath = GetParentPath(normalizedPath);
 
+        // Fast path: parent folder already resolved
+        if (_folderObjects.TryGetValue(parentPath, out IFolder? parent))
+            return GetChildFile(parent, segments[^1]);
+
+        // Full resolution from root, caching each intermediate folder
+        IFolder current = _root;
+        string currPath = string.Empty;
         for (int i = 0; i < segments.Length - 1; i++)
         {
             IFolder? sub = GetChildFolder(current, segments[i]);
             if (sub is null) return null;
             current = sub;
+            currPath = CombineNormalizedPath(currPath, segments[i]);
+            _folderObjects.TryAdd(currPath, current);
         }
 
         return GetChildFile(current, segments[^1]);
@@ -1032,6 +1167,10 @@ public sealed class OwlMountFileSystem : FileSystemBase
 
     private IFolder? ResolveFolder(string normalizedPath)
     {
+        // Return immediately if already cached
+        if (_folderObjects.TryGetValue(normalizedPath, out IFolder? existing))
+            return existing;
+
         string[] segments = normalizedPath.Split('/');
         IFolder current = _root;
         string currentPath = string.Empty;
@@ -1045,6 +1184,7 @@ public sealed class OwlMountFileSystem : FileSystemBase
             current = sub;
             currentPath = CombineNormalizedPath(currentPath, seg);
             EnsureFolderWatcher(current, currentPath);
+            _folderObjects.TryAdd(currentPath, current);
         }
 
         return current;
@@ -1072,6 +1212,14 @@ public sealed class OwlMountFileSystem : FileSystemBase
         }
         catch
         {
+            // Don't enumerate entire bucket for known non-existent files
+            if (name.Equals("desktop.ini", StringComparison.OrdinalIgnoreCase) ||
+                name.Equals("thumbs.db", StringComparison.OrdinalIgnoreCase) ||
+                name.Equals("autorun.inf", StringComparison.OrdinalIgnoreCase))
+            {
+                return null;
+            }
+            
             return folder.GetItemsAsync()
                 .ToBlockingEnumerable()
                 .FirstOrDefault(x => string.Equals(x.Name, name, StringComparison.OrdinalIgnoreCase));
@@ -1132,7 +1280,9 @@ public sealed class OwlMountFileSystem : FileSystemBase
         ctx.Entry.LastModifiedAt = now;
         ctx.Entry.LastAccessedAt = now;
         _index.AddOrUpdate(ctx.NormalizedPath, ctx.Entry);
-        _blockCache.Invalidate(ctx.File.Id);
+        _blockCache?.Invalidate(ctx.File.Id);
+        _index.AddOrUpdate(ctx.NormalizedPath, ctx.Entry);
+        _blockCache?.Invalidate(ctx.File.Id);
         _dirCache.Invalidate(GetParentPath(ctx.NormalizedPath));
     }
 
@@ -1140,8 +1290,19 @@ public sealed class OwlMountFileSystem : FileSystemBase
     {
         _index.RemoveSubtree(normalizedPath);
         _dirCache.InvalidateSubtree(normalizedPath);
+        RemoveFolderObjectSubtree(normalizedPath);
         if (!string.IsNullOrWhiteSpace(fileId))
-            _blockCache.Invalidate(fileId);
+            _blockCache?.Invalidate(fileId);
+    }
+
+    private void RemoveFolderObjectSubtree(string normalizedPath)
+    {
+        _folderObjects.TryRemove(normalizedPath, out _);
+        if (string.IsNullOrEmpty(normalizedPath)) return;
+        string prefix = normalizedPath + "/";
+        foreach (string key in _folderObjects.Keys.ToList())
+            if (key.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                _folderObjects.TryRemove(key, out _);
     }
 
     private static string GetParentPath(string normalizedPath)
@@ -1154,6 +1315,19 @@ public sealed class OwlMountFileSystem : FileSystemBase
     {
         int slash = normalizedPath.LastIndexOf('/');
         return slash < 0 ? normalizedPath : normalizedPath[(slash + 1)..];
+    }
+
+    private static bool FolderHasAnyChildren(IFolder folder)
+    {
+        IAsyncEnumerator<IStorableChild> e = folder.GetItemsAsync().GetAsyncEnumerator();
+        try
+        {
+            return e.MoveNextAsync().ConfigureAwait(false).GetAwaiter().GetResult();
+        }
+        finally
+        {
+            e.DisposeAsync().ConfigureAwait(false).GetAwaiter().GetResult();
+        }
     }
 
     private string GetNormalizedPath(object fileNode, string fileName) =>
@@ -1204,9 +1378,7 @@ public sealed class OwlMountFileSystem : FileSystemBase
             switch (child)
             {
                 case IChildFile childFile:
-                    ModifiableFolderExtensions
-                        .MoveFromAsync(destinationFolderMod, childFile, sourceFolderMod, false, CancellationToken.None)
-                        .GetAwaiter().GetResult();
+                    destinationFolderMod.MoveFromAsync(childFile, sourceFolderMod, false, CancellationToken.None).GetAwaiter().GetResult();
                     break;
 
                 case IChildFolder childFolder when childFolder is IModifiableFolder childFolderMod:
@@ -1268,62 +1440,9 @@ public sealed class OwlMountFileSystem : FileSystemBase
         }
     }
 
-    private static DateTimeOffset? GetCreatedAt(IStorable item)
-    {
-        if (item is ICreatedAtOffset cao)
-        {
-            DateTimeOffset? value = cao.CreatedAtOffset.GetValueAsync().GetAwaiter().GetResult();
-            if (value is not null && value != DateTimeOffset.MinValue)
-                return value;
-        }
-
-        if (item is ICreatedAt ca)
-        {
-            DateTime? value = ca.CreatedAt.GetValueAsync().GetAwaiter().GetResult();
-            if (value is not null && value != DateTime.MinValue)
-                return new DateTimeOffset(value.Value, TimeSpan.Zero);
-        }
-
-        return null;
-    }
-
-    private static DateTimeOffset? GetLastAccessedAt(IStorable item)
-    {
-        if (item is ILastAccessedAtOffset lao)
-        {
-            DateTimeOffset? value = lao.LastAccessedAtOffset.GetValueAsync().GetAwaiter().GetResult();
-            if (value is not null && value != DateTimeOffset.MinValue)
-                return value;
-        }
-
-        if (item is ILastAccessedAt la)
-        {
-            DateTime? value = la.LastAccessedAt.GetValueAsync().GetAwaiter().GetResult();
-            if (value is not null && value != DateTime.MinValue)
-                return new DateTimeOffset(value.Value, TimeSpan.Zero);
-        }
-
-        return null;
-    }
-
-    private static DateTimeOffset? GetLastModifiedAt(IStorable item)
-    {
-        if (item is ILastModifiedAtOffset lmo)
-        {
-            DateTimeOffset? value = lmo.LastModifiedAtOffset.GetValueAsync().GetAwaiter().GetResult();
-            if (value is not null && value != DateTimeOffset.MinValue)
-                return value;
-        }
-
-        if (item is ILastModifiedAt lm)
-        {
-            DateTime? value = lm.LastModifiedAt.GetValueAsync().GetAwaiter().GetResult();
-            if (value is not null && value != DateTime.MinValue)
-                return new DateTimeOffset(value.Value, TimeSpan.Zero);
-        }
-
-        return null;
-    }
+    private static DateTimeOffset? GetCreatedAt(IStorable item)      => StorageTimestampHelper.GetCreatedAt(item);
+    private static DateTimeOffset? GetLastAccessedAt(IStorable item) => StorageTimestampHelper.GetLastAccessedAt(item);
+    private static DateTimeOffset? GetLastModifiedAt(IStorable item) => StorageTimestampHelper.GetLastModifiedAt(item);
 
     private static ulong ToFileTime(DateTimeOffset? dto)
     {

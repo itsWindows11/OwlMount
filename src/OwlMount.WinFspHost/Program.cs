@@ -1,10 +1,12 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
+using Amazon.Runtime;
 using Amazon.S3;
-using Fsp;
+using Amazon.S3.Model;
 using Ipfs.Http;
 using NfsSharp;
+using NfsSharp.Protocol;
 using OwlCore.Kubo;
 using OwlCore.Storage;
 using OwlCore.Storage.AmazonS3;
@@ -12,24 +14,20 @@ using OwlCore.Storage.Memory;
 using OwlCore.Storage.NfsSharp;
 using OwlCore.Storage.SharpCompress;
 using OwlCore.Storage.System.IO;
+using OwlMount.Core.Abstractions;
 using OwlMount.Core.Cache;
 using OwlMount.Core.Registry;
-using OwlMount.WinFspHost;
+using OwlMount.Core.Windows.Backends;
 
 [SupportedOSPlatform("windows")]
 static partial class Program
 {
     static async Task<int> Main(string[] args)
     {
-        // Support both the new subcommand form ("mount"/"unmount"/"list") and the
-        // legacy flag-only form ("--provider …") for backward compatibility.
         string sub = args.Length > 0 ? args[0].ToLowerInvariant() : "help";
 
         if (sub.StartsWith("--") || args.Length == 0)
-        {
-            // Legacy: no subcommand — treat the whole args array as "mount" args.
             return await RunMountAsync(args);
-        }
 
         return sub switch
         {
@@ -45,12 +43,13 @@ static partial class Program
     static async Task<int> RunMountAsync(string[] args)
     {
         string  provider      = "memory";
+        string  backend       = "winfsp";
         string  letter        = "M";
         string? label         = null;
         string? path          = null;
         bool    forceReadOnly = false;
-        ulong? totalSize      = null;
-        ulong? freeSize       = null;
+        ulong?  totalSize     = null;
+        ulong?  freeSize      = null;
         // S3
         string? s3Bucket   = null;
         string? s3Prefix   = null;
@@ -74,6 +73,7 @@ static partial class Program
             switch (args[i].ToLowerInvariant())
             {
                 case "--provider":     provider    = args[++i]; break;
+                case "--backend":      backend     = args[++i]; break;
                 case "--letter":       letter      = args[++i]; break;
                 case "--label":        label       = args[++i]; break;
                 case "--path":         path        = args[++i]; break;
@@ -97,9 +97,22 @@ static partial class Program
             }
         }
 
+        // ── Validate backend ──────────────────────────────────────────────────
+        backend = backend.ToLowerInvariant();
+        if (backend is not ("winfsp" or "projfs"))
+        {
+            Console.Error.WriteLine(
+                $"Error: unknown backend '{backend}'. Valid values: winfsp, projfs");
+            return 1;
+        }
+
         // ── Resolve the root IFolder ──────────────────────────────────────────
-        IFolder root;
-        string  displayRoot;
+        IFolder      root;
+        string       displayRoot;
+        IDisposable? extraDisposable = null; // tracks any provider-owned resource (e.g. S3 HttpClientFactory)
+        // Provider-specific fast-path size fetcher registered after the switch.
+        ISizeProvider? providerSizeProvider = null;
+        Func<IFile, bool>? providerSizePredicate = null;
 
         switch (provider.ToLowerInvariant())
         {
@@ -130,6 +143,23 @@ static partial class Program
                 root = new ArchiveFolder(new SystemFile(fullArchivePath));
                 displayRoot = fullArchivePath;
                 totalSize = TryGetArchiveVolumeSize(fullArchivePath);
+                forceReadOnly = true; // archives are inherently read-only
+                break;
+            }
+
+            // ── local (filesystem path) ───────────────────────────────────────
+            case "local":
+            {
+                string resolvedPath = path ?? string.Empty;
+                if (string.IsNullOrWhiteSpace(resolvedPath) || !Directory.Exists(resolvedPath))
+                {
+                    Console.Error.WriteLine(
+                        $"Error: --path must be an existing directory for provider 'local'.");
+                    return 1;
+                }
+
+                root = new SystemFolder(Path.GetFullPath(resolvedPath));
+                displayRoot = path!;
                 break;
             }
 
@@ -202,6 +232,10 @@ static partial class Program
                     s3Config.RegionEndpoint = Amazon.RegionEndpoint.GetBySystemName(s3Region);
                 if (!string.IsNullOrWhiteSpace(s3Endpoint))
                     s3Config.ServiceURL = s3Endpoint;
+                var tlsFactory = new TlsHttpClientFactory();
+                s3Config.HttpClientFactory = tlsFactory;
+                s3Config.ForcePathStyle = true;
+                extraDisposable = tlsFactory;
 
                 IAmazonS3 s3Client = (s3Key, s3Secret) switch
                 {
@@ -211,6 +245,8 @@ static partial class Program
 
                 root = new S3Folder(s3Client, s3Bucket, s3Prefix ?? string.Empty);
                 displayRoot = $"s3://{s3Bucket}/{s3Prefix ?? string.Empty}";
+                providerSizePredicate = f => f is S3File;
+                providerSizeProvider  = new S3HeadSizeProvider();
                 break;
             }
 
@@ -229,6 +265,8 @@ static partial class Program
                 root        = await NfsFolder.GetFromNfsPathAsync(nfsClient, nfsPath ?? "/");
                 displayRoot = $"nfs://{nfsHost}{nfsExport}{nfsPath}";
                 (totalSize, freeSize) = await TryGetNfsVolumeSpaceAsync(nfsClient);
+                providerSizePredicate = f => f is NfsFile;
+                providerSizeProvider  = new NfsStatSizeProvider(nfsClient);
                 break;
             }
 
@@ -239,11 +277,12 @@ static partial class Program
                 return 1;
         }
 
-        // Derive a default volume label from the provider name when none supplied
+        // ── Derive defaults ───────────────────────────────────────────────────
         string resolvedLabel = label ?? provider.ToUpperInvariant() switch
         {
             "MEMORY"    => "OwlMount (Memory)",
             "ARCHIVE"   => "OwlMount (Archive)",
+            "LOCAL"     => "OwlMount (Local)",
             "KUBO-MFS"  => "OwlMount (MFS)",
             "KUBO-IPFS" => "OwlMount (IPFS)",
             "KUBO-IPNS" => "OwlMount (IPNS)",
@@ -252,73 +291,84 @@ static partial class Program
             _           => "OwlMount",
         };
 
+        string driveLetter = letter.TrimEnd(':').ToUpperInvariant();
+        string mountPoint  = driveLetter + ":";
+
+        // ProjFS is always read-only; ensure the flag reflects reality
         bool isReadOnly = forceReadOnly || root is not IModifiableFolder;
 
-        Console.WriteLine($"OwlMount — provider: {provider}");
+        Console.WriteLine($"OwlMount — provider: {provider}  backend: {backend}");
         Console.WriteLine($"  Root   : {displayRoot}");
         Console.WriteLine($"  Label  : {resolvedLabel}");
         Console.WriteLine($"  Mode   : {(isReadOnly ? "read-only" : "read-write")}");
+        Console.WriteLine($"  Mount  : {mountPoint}\\");
         if (totalSize.HasValue)
         {
             Console.WriteLine($"  Size   : {FormatBytes(totalSize.Value)} total" +
                 (freeSize.HasValue ? $", {FormatBytes(freeSize.Value)} free" : string.Empty));
         }
+        Console.WriteLine();
 
         // ── Build the VFS components ──────────────────────────────────────────
         var rangeReaders  = new RangeReaderRegistry();
         var sizeProviders = new SizeProviderRegistry();
-        var blockCache    = new BlockCache(providerId: $"{provider}_{root.Id}");
+        // For in-memory and local filesystem providers we don't need a disk-backed
+        // block cache — read directly from the provider. Create a cache only for
+        // providers that may benefit from on-disk caching.
+        BlockCache? blockCache = (provider == "memory" || provider == "local")
+            ? null
+            : new BlockCache(providerId: $"{provider}_{root.Id}");
 
-        // CTS shared by CancelKeyPress and DispatcherStopped so either path exits cleanly.
+        // Register provider-specific optimisations.
+        // S3: use a HEAD request (GetObjectMetadata) to get file size rather than
+        //     opening a full GET stream, which avoids a full download per file.
+        // NFS: use GetAttr (single stat RPC) instead of opening and seeking a stream.
+        // Both providers run their size requests in parallel during directory listing.
+        if (providerSizeProvider is not null && providerSizePredicate is not null)
+            sizeProviders.Register(providerSizePredicate, providerSizeProvider);
+
+        // CTS shared by CancelKeyPress and backend.Stopped so either path exits cleanly.
         var cts = new CancellationTokenSource();
 
-        var fs = new OwlMountFileSystem(
-            root, blockCache, rangeReaders, sizeProviders,
-            readOnly: forceReadOnly,
-            totalSize: totalSize,
-            freeSize: freeSize,
-            volumeLabel: resolvedLabel,
-            onDispatcherStopped: () =>
-            {
-                // Fires when WinFsp stops the dispatcher — covers both Ctrl+C signals
-                // and the user ejecting/unmounting the drive from Explorer.
-                Console.WriteLine("\nDrive unmounted. Exiting…");
-                DeletePidFile(letter);
-                cts.Cancel();
-            });
-
-        // ── Configure the WinFsp host ─────────────────────────────────────────
-        var host = new FileSystemHost(fs)
+        // ── Create the backend ────────────────────────────────────────────────
+        IOwlMountBackend vfsBackend;
+        if (backend == "projfs")
         {
-            FileSystemName           = "OwlMount",
-            SectorSize               = 512,
-            SectorsPerAllocationUnit = 1,
-            MaxComponentLength       = 255,
-            CasePreservedNames       = true,
-            CaseSensitiveSearch      = false,
-            UnicodeOnDisk            = true,
-            VolumeSerialNumber       = 0x4F574C4D, // "OWLM"
-            FileInfoTimeout          = 1000,
-            VolumeInfoTimeout        = 1000,
-            DirInfoTimeout           = 1000,
+            if (!OperatingSystem.IsWindowsVersionAtLeast(10, 0, 17763))
+            {
+                Console.Error.WriteLine(
+                    "Error: ProjFS backend requires Windows 10 version 1803 (build 17763) or later.");
+                return 1;
+            }
+#pragma warning disable CA1416 // resolved by the version check above
+            vfsBackend = new ProjFsBackend(root, blockCache, rangeReaders, sizeProviders, isReadOnly);
+#pragma warning restore CA1416
+        }
+        else
+        {
+            vfsBackend = new WinFspBackend(
+                root, blockCache, rangeReaders, sizeProviders,
+                readOnly:  isReadOnly,
+                totalSize: totalSize,
+                freeSize:  freeSize);
+        }
+
+        // DispatcherStopped (WinFsp) or equivalent fires when the drive is ejected externally.
+        vfsBackend.Stopped += (_, _) =>
+        {
+            Console.WriteLine("\nDrive unmounted. Exiting…");
+            DeletePidFile(letter);
+            cts.Cancel();
         };
 
-        string mountPoint = letter.TrimEnd(':') + ":";
-        Console.WriteLine($"  Mount  : {mountPoint}\\");
-        Console.WriteLine();
-
-        int mountResult = host.Mount(mountPoint);
-        if (mountResult < 0)
+        if (!vfsBackend.Start(mountPoint, resolvedLabel))
         {
-            Console.Error.WriteLine(
-                $"Failed to mount at {mountPoint} (WinFsp error {mountResult}).");
-            Console.Error.WriteLine(
-                "Ensure WinFsp is installed and the drive letter is not already in use.");
-            Console.Error.WriteLine(
-                "  WinFsp installer: https://winfsp.dev/rel/");
+            vfsBackend.Dispose();
             return 1;
         }
 
+        try
+        {
         // ── Write PID file so 'owlmount unmount' can signal this process ──────
         string pidFile = GetPidFilePath(letter);
         Directory.CreateDirectory(Path.GetDirectoryName(pidFile)!);
@@ -326,15 +376,14 @@ static partial class Program
 
         Console.WriteLine($"Mounted successfully. Browsable at {mountPoint}\\");
         Console.WriteLine($"  PID    : {Environment.ProcessId}");
-        Console.WriteLine($"Unmount with: owlmount unmount --letter {letter.TrimEnd(':').ToUpperInvariant()}");
+        Console.WriteLine($"Unmount with: owlmount unmount --letter {driveLetter}");
         Console.WriteLine("Or press Ctrl+C.");
 
-        // ── Exit on Ctrl+C (cts is also cancelled by DispatcherStopped) ───────
         Console.CancelKeyPress += (_, e) =>
         {
             e.Cancel = true;
             Console.WriteLine("\nUnmounting…");
-            host.Unmount();
+            vfsBackend.Stop();
             DeletePidFile(letter);
             cts.Cancel();
         };
@@ -344,6 +393,12 @@ static partial class Program
             await Task.Delay(Timeout.Infinite, cts.Token);
         }
         catch (OperationCanceledException) { /* expected */ }
+        }
+        finally
+        {
+            vfsBackend.Dispose();
+            extraDisposable?.Dispose();
+        }
 
         Console.WriteLine("Done.");
         return 0;
@@ -382,30 +437,26 @@ static partial class Program
             return 1;
         }
 
-        // Verify the process is still alive before trying to signal it.
         try
         {
             var proc = Process.GetProcessById(pid);
             if (proc.HasExited)
             {
-                Console.Error.WriteLine(
-                    $"Mount process (PID {pid}) has already exited.");
+                Console.Error.WriteLine($"Mount process (PID {pid}) has already exited.");
                 File.Delete(pidFile);
                 return 1;
             }
         }
         catch (ArgumentException)
         {
-            Console.Error.WriteLine(
-                $"Mount process (PID {pid}) is no longer running.");
+            Console.Error.WriteLine($"Mount process (PID {pid}) is no longer running.");
             File.Delete(pidFile);
             return 1;
         }
 
         if (!SendCtrlC(pid))
         {
-            Console.Error.WriteLine(
-                $"Failed to send unmount signal to process {pid}.");
+            Console.Error.WriteLine($"Failed to send unmount signal to process {pid}.");
             return 1;
         }
 
@@ -457,7 +508,6 @@ static partial class Program
             }
             else
             {
-                // Stale entry — clean up silently.
                 try { File.Delete(pidFile); } catch { /* best-effort */ }
             }
         }
@@ -480,13 +530,17 @@ static partial class Program
         Console.WriteLine("  owlmount list");
         Console.WriteLine();
         Console.WriteLine("Mount options (all providers):");
-        Console.WriteLine("  --provider   memory | archive | kubo-mfs | kubo-ipfs | kubo-ipns | s3 | nfs  (default: memory)");
+        Console.WriteLine(
+            "  --provider   memory | archive | local | kubo-mfs | kubo-ipfs | kubo-ipns | s3 | nfs  (default: memory)");
+        Console.WriteLine(
+            "  --backend    winfsp | projfs  (default: winfsp)");
         Console.WriteLine("  --letter     Drive letter to mount on (default: M)");
         Console.WriteLine("  --label      Volume label shown in Explorer (default: auto)");
         Console.WriteLine("  --read-only  Force the mounted filesystem to open as read-only");
         Console.WriteLine();
         Console.WriteLine("  memory       (no extra flags; drive starts empty)");
         Console.WriteLine("  archive      --archive-file <local-archive-path>");
+        Console.WriteLine("  local        --path <local-directory-path>");
         Console.WriteLine("  kubo-mfs     --path <mfs-path>  [--api-url http://127.0.0.1:5001]");
         Console.WriteLine("  kubo-ipfs    --cid <CID>        [--api-url http://127.0.0.1:5001]");
         Console.WriteLine("  kubo-ipns    --ipns <address>   [--api-url http://127.0.0.1:5001]");
@@ -499,7 +553,9 @@ static partial class Program
         Console.WriteLine("Examples:");
         Console.WriteLine("  owlmount mount --provider memory --letter R");
         Console.WriteLine("  owlmount mount --provider memory --letter R --read-only");
+        Console.WriteLine("  owlmount mount --provider memory --letter R --backend projfs");
         Console.WriteLine("  owlmount mount --provider archive --archive-file C:\\data\\backup.zip --letter A");
+        Console.WriteLine("  owlmount mount --provider local --path C:\\data --letter D");
         Console.WriteLine("  owlmount mount --provider kubo-mfs --path /my/dir --letter K --label IPFS");
         Console.WriteLine("  owlmount mount --provider kubo-ipfs --cid bafybei... --letter I");
         Console.WriteLine("  owlmount mount --provider s3 --bucket my-bucket --prefix data/ --letter S");
@@ -524,6 +580,8 @@ static partial class Program
         try { File.Delete(GetPidFilePath(letter)); } catch { /* best-effort */ }
     }
 
+    // ── Volume size helpers ───────────────────────────────────────────────────
+
     static (ulong? TotalSize, ulong? FreeSize) GetMemoryVolumeSpace()
     {
         var gcInfo = GC.GetGCMemoryInfo();
@@ -531,8 +589,8 @@ static partial class Program
             return (null, null);
 
         ulong total = (ulong)gcInfo.TotalAvailableMemoryBytes;
-        ulong used = (ulong)Math.Max(GC.GetTotalMemory(forceFullCollection: false), 0L);
-        ulong free = used >= total ? 0 : total - used;
+        ulong used  = (ulong)Math.Max(GC.GetTotalMemory(forceFullCollection: false), 0L);
+        ulong free  = used >= total ? 0 : total - used;
         return (total, free);
     }
 
@@ -540,13 +598,9 @@ static partial class Program
     {
         try
         {
-            string fullArchivePath = Path.GetFullPath(archivePath);
-            string? root = Path.GetPathRoot(fullArchivePath);
-            if (string.IsNullOrWhiteSpace(root))
-                return null;
-
-            var drive = new DriveInfo(root);
-            long available = drive.AvailableFreeSpace;
+            string? root = Path.GetPathRoot(Path.GetFullPath(archivePath));
+            if (string.IsNullOrWhiteSpace(root)) return null;
+            long available = new DriveInfo(root).AvailableFreeSpace;
             return available > 0 ? (ulong)available : null;
         }
         catch
@@ -559,10 +613,10 @@ static partial class Program
     {
         try
         {
-            var repository = await client.Stats.RepositoryAsync(CancellationToken.None);
-            ulong total = repository.StorageMax;
-            ulong used = repository.RepoSize;
-            ulong free = used >= total ? 0 : total - used;
+            var repo  = await client.Stats.RepositoryAsync(CancellationToken.None);
+            ulong total = repo.StorageMax;
+            ulong used  = repo.RepoSize;
+            ulong free  = used >= total ? 0 : total - used;
             return total == 0 ? (null, null) : (total, free);
         }
         catch
@@ -571,7 +625,8 @@ static partial class Program
         }
     }
 
-    static async Task<(ulong? TotalSize, ulong? FreeSize)> TryGetDagVolumeSpaceAsync(IpfsClient client, string path)
+    static async Task<(ulong? TotalSize, ulong? FreeSize)> TryGetDagVolumeSpaceAsync(
+        IpfsClient client, string path)
     {
         try
         {
@@ -627,7 +682,8 @@ static partial class Program
 
     [LibraryImport("kernel32", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    private static partial bool SetConsoleCtrlHandler(nint handlerRoutine, [MarshalAs(UnmanagedType.Bool)] bool add);
+    private static partial bool SetConsoleCtrlHandler(
+        nint handlerRoutine, [MarshalAs(UnmanagedType.Bool)] bool add);
 
     private const uint CtrlCEvent = 0;
 
@@ -638,25 +694,80 @@ static partial class Program
     /// </summary>
     static bool SendCtrlC(int pid)
     {
-        // Detach from our own console so we can attach to the target's.
         FreeConsole();
+        if (!AttachConsole(pid)) return false;
 
-        if (!AttachConsole(pid))
-            return false;
-
-        // Ignore CTRL+C in this process so we don't terminate ourselves.
         SetConsoleCtrlHandler(nint.Zero, true);
-
         bool ok = GenerateConsoleCtrlEvent(CtrlCEvent, 0);
-
-        // Brief pause so the mount process can start handling the signal.
         Thread.Sleep(500);
 
         FreeConsole();
-
-        // Restore default CTRL+C behaviour for this process.
         SetConsoleCtrlHandler(nint.Zero, false);
 
         return ok;
+    }
+
+    // ── Provider-specific size fastpath helpers ───────────────────────────────
+
+    /// <summary>
+    /// <see cref="ISizeProvider"/> for S3 files that uses a HEAD request
+    /// (<see cref="S3File.GetMetadataAsync"/>) to retrieve the object's
+    /// <see cref="GetObjectMetadataResponse.ContentLength"/> cheaply, instead of
+    /// opening a full GET stream just to read <see cref="System.IO.Stream.Length"/>.
+    /// </summary>
+    private sealed class S3HeadSizeProvider : ISizeProvider
+    {
+        public async Task<long?> GetSizeAsync(IFile file, CancellationToken ct = default)
+        {
+            if (file is not S3File s3File) return null;
+            GetObjectMetadataResponse meta = await s3File.GetMetadataAsync(ct);
+            return meta.ContentLength;
+        }
+    }
+
+    /// <summary>
+    /// <see cref="ISizeProvider"/> for NFS files that retrieves file size via a single
+    /// <c>GETATTR</c> RPC (<see cref="INfsClient.GetAttrAsync"/>) rather than opening
+    /// a full stream.  The <see cref="NfsFileAttributes.Size"/> field returned by the
+    /// server already contains the authoritative file size.
+    /// </summary>
+    private sealed class NfsStatSizeProvider(INfsClient nfsClient) : ISizeProvider
+    {
+        public async Task<long?> GetSizeAsync(IFile file, CancellationToken ct = default)
+        {
+            if (file is not NfsFile nfsFile) return null;
+            NfsFileAttributes attrs = await nfsClient.GetAttrAsync(nfsFile.Path, ct);
+            return (long)attrs.Size;
+        }
+    }
+
+    /// <summary>
+    /// Custom <see cref="Amazon.Runtime.HttpClientFactory"/> that creates an
+    /// <see cref="System.Net.Http.HttpClient"/> backed by a
+    /// <see cref="SocketsHttpHandler"/> with TLS 1.2 and 1.3 explicitly enabled.
+    /// This prevents the <c>HandshakeFailure</c> TLS alert that can occur with the
+    /// default AWSSDK v4 HTTP pipeline against standard S3 and S3-compatible endpoints.
+    /// The single <see cref="HttpClient"/> instance is intentionally kept alive for the
+    /// application lifetime; it is disposed when this factory is disposed.
+    /// </summary>
+    private sealed class TlsHttpClientFactory : HttpClientFactory, IDisposable
+    {
+        private readonly HttpClient _client = new(new SocketsHttpHandler
+        {
+            PooledConnectionLifetime = TimeSpan.FromMinutes(5),
+            SslOptions = new System.Net.Security.SslClientAuthenticationOptions
+            {
+                EnabledSslProtocols =
+                    System.Security.Authentication.SslProtocols.Tls12 |
+                    System.Security.Authentication.SslProtocols.Tls13,
+            },
+        });
+
+        public override HttpClient CreateHttpClient(IClientConfig config) => _client;
+        public override bool UseSDKHttpClientCaching(IClientConfig config)    => true;
+        public override bool DisposeHttpClientsAfterUse(IClientConfig config) => false;
+        public override string GetConfigUniqueString(IClientConfig config)    => "owlmount-tls";
+
+        public void Dispose() => _client.Dispose();
     }
 }
