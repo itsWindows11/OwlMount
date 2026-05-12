@@ -10,6 +10,7 @@ public partial class MainWindowViewModel : ObservableObject
 {
     private readonly MountService _mountService;
     private readonly Action _exitAction;
+    private Func<string?> _s3SecretProvider;
     private bool _isInitializing = true;
     private bool? _readOnlyBeforeArchive;
 
@@ -40,7 +41,6 @@ public partial class MainWindowViewModel : ObservableObject
     [ObservableProperty] private string? s3Bucket;
     [ObservableProperty] private string? s3Prefix;
     [ObservableProperty] private string? s3AccessKey;
-    [ObservableProperty] private string? s3SecretKey;
     [ObservableProperty] private string? s3Region;
     [ObservableProperty] private string? s3Endpoint;
     [ObservableProperty] private string? nfsHost;
@@ -51,10 +51,11 @@ public partial class MainWindowViewModel : ObservableObject
     [ObservableProperty] private Visibility s3Visibility = Visibility.Collapsed;
     [ObservableProperty] private Visibility nfsVisibility = Visibility.Collapsed;
 
-    public MainWindowViewModel(MountService mountService, Action exitAction)
+    public MainWindowViewModel(MountService mountService, Action exitAction, Func<string?>? s3SecretProvider = null)
     {
         _mountService = mountService;
         _exitAction = exitAction;
+        _s3SecretProvider = s3SecretProvider ?? (() => null);
 
         SaveMountConfigurations = _mountService.SaveMountPointConfigurations;
         PersistMemoryFsOnExit = _mountService.PersistMemoryFileSystemOnExit;
@@ -84,6 +85,8 @@ public partial class MainWindowViewModel : ObservableObject
     }
 
     public void SetStatus(string message) => StatusMessage = message;
+
+    public void SetS3SecretProvider(Func<string?> provider) => _s3SecretProvider = provider;
 
     public void UnmountSelected(IReadOnlyList<MountEntry> selected)
     {
@@ -137,7 +140,7 @@ public partial class MainWindowViewModel : ObservableObject
                 S3Bucket = NullIfBlank(S3Bucket),
                 S3Prefix = NullIfBlank(S3Prefix),
                 S3AccessKey = NullIfBlank(S3AccessKey),
-                S3SecretKey = NullIfBlank(S3SecretKey),
+                S3SecretKey = NullIfBlank(_s3SecretProvider()),
                 S3Region = NullIfBlank(S3Region),
                 S3Endpoint = NullIfBlank(S3Endpoint),
                 NfsHost = NullIfBlank(NfsHost),
@@ -235,21 +238,5 @@ public partial class MainWindowViewModel : ObservableObject
             .Where(s => s.Length == 1 && char.IsLetter(s[0]))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
-    }
-}
-
-public sealed class MountEntry
-{
-    public string DriveLetter { get; set; }
-    public string Label { get; set; }
-    public string Provider { get; set; }
-    public string State { get; set; }
-
-    public MountEntry(string driveLetter, string label, string provider, string state)
-    {
-        DriveLetter = driveLetter;
-        Label = label;
-        Provider = provider;
-        State = state;
     }
 }
