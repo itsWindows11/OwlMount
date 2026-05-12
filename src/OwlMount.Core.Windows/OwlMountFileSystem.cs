@@ -564,6 +564,40 @@ public sealed class OwlMountFileSystem : FileSystemBase
         }
     }
 
+    public override int CanDelete(object fileNode, object fileDesc, string fileName)
+    {
+        if (_isReadOnly) return STATUS_MEDIA_WRITE_PROTECTED;
+
+        string normalizedPath = GetNormalizedPath(fileNode, fileName);
+        if (string.IsNullOrEmpty(normalizedPath))
+            return STATUS_ACCESS_DENIED;
+
+        try
+        {
+            if (fileNode is FolderContext dc)
+            {
+                return dc.Folder.GetItemsAsync().ToBlockingEnumerable().Any()
+                    ? STATUS_DIRECTORY_NOT_EMPTY
+                    : STATUS_SUCCESS;
+            }
+
+            if (fileNode is FileContext)
+                return STATUS_SUCCESS;
+
+            IStorableChild? item = ResolveItem(normalizedPath);
+
+            if (item is null) return STATUS_OBJECT_NAME_NOT_FOUND;
+            if (item is IFolder folder && folder.GetItemsAsync().ToBlockingEnumerable().Any())
+                return STATUS_DIRECTORY_NOT_EMPTY;
+
+            return STATUS_SUCCESS;
+        }
+        catch (Exception ex)
+        {
+            return HandleWriteFailure("can-delete", normalizedPath, ex, STATUS_UNEXPECTED_IO_ERROR);
+        }
+    }
+
     public override void Cleanup(object fileNode, object fileDesc, string fileName, uint flags)
     {
         if (_isReadOnly || (flags & CleanupDelete) == 0)
@@ -573,20 +607,25 @@ public sealed class OwlMountFileSystem : FileSystemBase
         if (string.IsNullOrEmpty(normalizedPath))
             return;
 
-        string parentPath = GetParentPath(normalizedPath);
-        IFolder? parent = ResolveFolderOrRoot(parentPath);
-        if (parent is not IModifiableFolder modifiableParent)
-            return;
-
-        IStorableChild? child = GetChild(parent, GetLeafName(normalizedPath));
-        if (child is null)
-            return;
-
-        if (fileNode is FileContext fc)
-            fc.DisposeWriteStream();
-
         try
         {
+            string parentPath = GetParentPath(normalizedPath);
+            IFolder? parent = ResolveFolderOrRoot(parentPath);
+            if (parent is not IModifiableFolder modifiableParent)
+                return;
+
+            IStorableChild? child = GetChild(parent, GetLeafName(normalizedPath));
+            if (child is null)
+            {
+                RemoveFolderWatchers(normalizedPath);
+                InvalidatePath(normalizedPath);
+                _dirCache.Invalidate(parentPath);
+                return;
+            }
+
+            if (fileNode is FileContext fc)
+                fc.DisposeWriteStream();
+
             modifiableParent.DeleteAsync(child).GetAwaiter().GetResult();
             RemoveFolderWatchers(normalizedPath);
             InvalidatePath(normalizedPath, child.Id);
