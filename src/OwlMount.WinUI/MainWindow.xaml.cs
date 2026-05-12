@@ -27,6 +27,7 @@ public sealed partial class MainWindow : Window, INotifyPropertyChanged
 
     public event PropertyChangedEventHandler? PropertyChanged;
     private bool _isInitializing;
+    private bool? _readOnlyBeforeArchive;
 
     // ── Construction ──────────────────────────────────────────────────────────
 
@@ -235,7 +236,21 @@ public sealed partial class MainWindow : Window, INotifyPropertyChanged
             ? Visibility.Visible : Visibility.Collapsed;
 
         if (provider == "archive")
+        {
+            if (_readOnlyBeforeArchive is null)
+                _readOnlyBeforeArchive = ReadOnlyCheckBox.IsChecked is true;
+
             ReadOnlyCheckBox.IsChecked = true;
+            ReadOnlyCheckBox.IsEnabled = false;
+            return;
+        }
+
+        ReadOnlyCheckBox.IsEnabled = true;
+        if (_readOnlyBeforeArchive is bool previousValue)
+        {
+            ReadOnlyCheckBox.IsChecked = previousValue;
+            _readOnlyBeforeArchive = null;
+        }
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
