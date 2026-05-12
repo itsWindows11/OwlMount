@@ -596,7 +596,7 @@ public sealed class ActiveMount
     public required string Provider { get; init; }
     public required string BackendName { get; init; }
     public required bool IsReadOnly { get; init; }
-    internal required IFolder RootFolder { get; init; }
-    internal required IOwlMountBackend BackendInstance { get; init; }
+    public required IFolder RootFolder { get; init; }
+    public required IOwlMountBackend BackendInstance { get; init; }
     internal IDisposable? ExtraDisposable { get; init; }
 }
