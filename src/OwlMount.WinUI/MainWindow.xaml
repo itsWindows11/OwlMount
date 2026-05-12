@@ -120,94 +120,77 @@
 
                     <TextBlock Grid.Row="0" Grid.Column="0" VerticalAlignment="Center" Text="Provider" />
                     <ComboBox
-                        x:Name="ProviderComboBox"
                         Grid.Row="0" Grid.Column="1"
                         HorizontalAlignment="Stretch"
-                        SelectionChanged="ProviderComboBox_SelectionChanged">
-                        <ComboBoxItem Content="memory" />
-                        <ComboBoxItem Content="archive" />
-                        <ComboBoxItem Content="local" />
-                        <ComboBoxItem Content="kubo-mfs" />
-                        <ComboBoxItem Content="kubo-ipfs" />
-                        <ComboBoxItem Content="kubo-ipns" />
-                        <ComboBoxItem Content="s3" />
-                        <ComboBoxItem Content="nfs" />
-                    </ComboBox>
+                        ItemsSource="{x:Bind ViewModel.Providers}"
+                        SelectedItem="{x:Bind ViewModel.SelectedProvider, Mode=TwoWay}" />
 
                     <TextBlock Grid.Row="1" Grid.Column="0" VerticalAlignment="Center" Text="Backend" />
                     <ComboBox
-                        x:Name="BackendComboBox"
                         Grid.Row="1" Grid.Column="1"
-                        HorizontalAlignment="Stretch">
-                        <ComboBoxItem Content="winfsp" />
-                        <ComboBoxItem Content="projfs" />
-                    </ComboBox>
+                        HorizontalAlignment="Stretch"
+                        ItemsSource="{x:Bind ViewModel.Backends}"
+                        SelectedItem="{x:Bind ViewModel.SelectedBackend, Mode=TwoWay}" />
 
                     <TextBlock Grid.Row="2" Grid.Column="0" VerticalAlignment="Center" Text="Drive letters" />
-                    <TextBox x:Name="DriveLettersTextBox" Grid.Row="2" Grid.Column="1" PlaceholderText="M, R, X" />
+                    <TextBox Grid.Row="2" Grid.Column="1" PlaceholderText="M, R, X" Text="{x:Bind ViewModel.DriveLetters, Mode=TwoWay}" />
 
                     <TextBlock Grid.Row="3" Grid.Column="0" VerticalAlignment="Center" Text="Label (optional)" />
-                    <TextBox x:Name="LabelTextBox" Grid.Row="3" Grid.Column="1" PlaceholderText="OwlMount (Memory)" />
+                    <TextBox Grid.Row="3" Grid.Column="1" PlaceholderText="OwlMount (Memory)" Text="{x:Bind ViewModel.Label, Mode=TwoWay}" />
                 </Grid>
 
-                <CheckBox x:Name="ReadOnlyCheckBox" Content="Read-only" />
+                <CheckBox Content="Read-only" IsChecked="{x:Bind ViewModel.ReadOnly, Mode=TwoWay}" IsEnabled="{x:Bind ViewModel.ReadOnlyEnabled, Mode=OneWay}" />
                 <CheckBox
-                    x:Name="SaveMountConfigurationsCheckBox"
                     Content="Save mount point configurations"
-                    IsChecked="True"
-                    Checked="SaveMountConfigurationsCheckBox_Changed"
-                    Unchecked="SaveMountConfigurationsCheckBox_Changed" />
+                    IsChecked="{x:Bind ViewModel.SaveMountConfigurations, Mode=TwoWay}" />
                 <CheckBox
-                    x:Name="PersistMemoryFsOnExitCheckBox"
                     Content="Persist in-memory filesystem files on exit"
-                    IsChecked="False"
-                    Checked="PersistMemoryFsSettings_Changed"
-                    Unchecked="PersistMemoryFsSettings_Changed" />
+                    IsChecked="{x:Bind ViewModel.PersistMemoryFsOnExit, Mode=TwoWay}" />
                 <TextBox
-                    x:Name="PersistMemoryFsPathTextBox"
                     PlaceholderText="Path for in-memory filesystem export"
-                    LostFocus="PersistMemoryFsSettings_Changed" />
+                    Text="{x:Bind ViewModel.PersistMemoryFsPath, Mode=TwoWay}"
+                    IsEnabled="{x:Bind ViewModel.PersistMemoryFsPathEnabled, Mode=OneWay}" />
 
-                <Expander x:Name="LocalOrArchiveExpander" Header="Local/Archive" HorizontalAlignment="Stretch" IsExpanded="True">
+                <Expander Header="Local/Archive" HorizontalAlignment="Stretch" IsExpanded="True" Visibility="{x:Bind ViewModel.LocalOrArchiveVisibility, Mode=OneWay}">
                     <StackPanel Spacing="8" Padding="0,8,0,0">
-                        <TextBox x:Name="PathTextBox" PlaceholderText="--path (local)" />
-                        <TextBox x:Name="ArchiveFileTextBox" PlaceholderText="--archive-file (archive)" />
+                        <TextBox PlaceholderText="--path (local)" Text="{x:Bind ViewModel.Path, Mode=TwoWay}" />
+                        <TextBox PlaceholderText="--archive-file (archive)" Text="{x:Bind ViewModel.ArchiveFile, Mode=TwoWay}" />
                     </StackPanel>
                 </Expander>
 
-                <Expander x:Name="KuboExpander" Header="Kubo" HorizontalAlignment="Stretch" IsExpanded="False">
+                <Expander Header="Kubo" HorizontalAlignment="Stretch" IsExpanded="False" Visibility="{x:Bind ViewModel.KuboVisibility, Mode=OneWay}">
                     <StackPanel Spacing="8" Padding="0,8,0,0">
-                        <TextBox x:Name="ApiUrlTextBox" PlaceholderText="--api-url (optional)" />
-                        <TextBox x:Name="CidTextBox" PlaceholderText="--cid (kubo-ipfs)" />
-                        <TextBox x:Name="IpnsTextBox" PlaceholderText="--ipns (kubo-ipns)" />
+                        <TextBox PlaceholderText="--api-url (optional)" Text="{x:Bind ViewModel.ApiUrl, Mode=TwoWay}" />
+                        <TextBox PlaceholderText="--cid (kubo-ipfs)" Text="{x:Bind ViewModel.Cid, Mode=TwoWay}" />
+                        <TextBox PlaceholderText="--ipns (kubo-ipns)" Text="{x:Bind ViewModel.Ipns, Mode=TwoWay}" />
                     </StackPanel>
                 </Expander>
 
-                <Expander x:Name="S3Expander" Header="Amazon S3" HorizontalAlignment="Stretch" IsExpanded="False">
+                <Expander Header="Amazon S3" HorizontalAlignment="Stretch" IsExpanded="False" Visibility="{x:Bind ViewModel.S3Visibility, Mode=OneWay}">
                     <StackPanel Spacing="8" Padding="0,8,0,0">
-                        <TextBox x:Name="S3BucketTextBox" PlaceholderText="--bucket" />
-                        <TextBox x:Name="S3PrefixTextBox" PlaceholderText="--prefix (optional)" />
-                        <TextBox x:Name="S3AccessKeyTextBox" PlaceholderText="--access-key (optional)" />
-                        <PasswordBox x:Name="S3SecretKeyTextBox" PlaceholderText="--secret-key (optional)" />
-                        <TextBox x:Name="S3RegionTextBox" PlaceholderText="--region (optional)" />
-                        <TextBox x:Name="S3EndpointTextBox" PlaceholderText="--endpoint (optional)" />
+                        <TextBox PlaceholderText="--bucket" Text="{x:Bind ViewModel.S3Bucket, Mode=TwoWay}" />
+                        <TextBox PlaceholderText="--prefix (optional)" Text="{x:Bind ViewModel.S3Prefix, Mode=TwoWay}" />
+                        <TextBox PlaceholderText="--access-key (optional)" Text="{x:Bind ViewModel.S3AccessKey, Mode=TwoWay}" />
+                        <PasswordBox x:Name="S3SecretKeyTextBox" PlaceholderText="--secret-key (optional)" PasswordChanged="S3SecretKeyTextBox_PasswordChanged" />
+                        <TextBox PlaceholderText="--region (optional)" Text="{x:Bind ViewModel.S3Region, Mode=TwoWay}" />
+                        <TextBox PlaceholderText="--endpoint (optional)" Text="{x:Bind ViewModel.S3Endpoint, Mode=TwoWay}" />
                     </StackPanel>
                 </Expander>
 
-                <Expander x:Name="NfsExpander" Header="NFS" HorizontalAlignment="Stretch" IsExpanded="False">
+                <Expander Header="NFS" HorizontalAlignment="Stretch" IsExpanded="False" Visibility="{x:Bind ViewModel.NfsVisibility, Mode=OneWay}">
                     <StackPanel Spacing="8" Padding="0,8,0,0">
-                        <TextBox x:Name="NfsHostTextBox" PlaceholderText="--host" />
-                        <TextBox x:Name="NfsExportTextBox" PlaceholderText="--export" />
-                        <TextBox x:Name="NfsPathTextBox" PlaceholderText="--nfs-path (optional, default /)" />
+                        <TextBox PlaceholderText="--host" Text="{x:Bind ViewModel.NfsHost, Mode=TwoWay}" />
+                        <TextBox PlaceholderText="--export" Text="{x:Bind ViewModel.NfsExport, Mode=TwoWay}" />
+                        <TextBox PlaceholderText="--nfs-path (optional, default /)" Text="{x:Bind ViewModel.NfsPath, Mode=TwoWay}" />
                     </StackPanel>
                 </Expander>
 
                 <!-- Action buttons — Orientation switches via VisualStateManager -->
                 <StackPanel x:Name="ActionButtonsPanel" Orientation="Horizontal" Spacing="8">
-                    <Button Content="Mount" Click="MountButton_Click" />
-                    <Button Content="Refresh" Click="RefreshButton_Click" />
+                    <Button Content="Mount" Command="{x:Bind ViewModel.MountCommand}" />
+                    <Button Content="Refresh" Command="{x:Bind ViewModel.RefreshCommand}" />
                     <Button Content="Unmount selected" Click="UnmountSelectedButton_Click" />
-                    <Button Content="Exit" Click="ExitButton_Click" />
+                    <Button Content="Exit" Command="{x:Bind ViewModel.ExitCommand}" />
                 </StackPanel>
 
                 <!--
@@ -220,9 +203,9 @@
                         x:Name="MountsListView"
                         MinHeight="80"
                         SelectionMode="Multiple"
-                        ItemsSource="{x:Bind Mounts}"
+                        ItemsSource="{x:Bind ViewModel.Mounts}"
                         ItemTemplate="{StaticResource MountItemTemplate}" />
-                    <TextBlock Text="{x:Bind StatusMessage, Mode=OneWay}" TextWrapping="Wrap" Opacity="0.85" />
+                    <TextBlock Text="{x:Bind ViewModel.StatusMessage, Mode=OneWay}" TextWrapping="Wrap" Opacity="0.85" />
                     <TextBlock Text="Tip: closing this window minimizes OwlMount to the system tray." Opacity="0.55" FontSize="12" />
                 </StackPanel>
             </StackPanel>
@@ -253,13 +236,13 @@
                 Grid.Row="1"
                 x:Name="MountsListViewSide"
                 SelectionMode="Multiple"
-                ItemsSource="{x:Bind Mounts}"
+                ItemsSource="{x:Bind ViewModel.Mounts}"
                 ItemTemplate="{StaticResource MountItemTemplate}" />
 
             <TextBlock
                 Grid.Row="2"
                 Margin="0,8,0,0"
-                Text="{x:Bind StatusMessage, Mode=OneWay}"
+                Text="{x:Bind ViewModel.StatusMessage, Mode=OneWay}"
                 TextWrapping="Wrap"
                 Opacity="0.85" />
 

@@ -16,6 +16,7 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.WindowsAppSDK" Version="2.0.1" />
     <PackageReference Include="CommunityToolkit.Labs.WinUI.TitleBar" Version="0.0.1-build.2206" />
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.0" />
     <!-- Provider packages (same versions as OwlMount.WinFspHost) -->
     <PackageReference Include="OwlCore.Kubo" Version="0.22.4" />
     <PackageReference Include="OwlCore.Storage.AmazonS3" Version="0.1.1" />
