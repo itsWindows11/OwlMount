@@ -40,6 +40,9 @@ public sealed partial class MainWindow : Window, INotifyPropertyChanged
         DriveLettersTextBox.Text = "M";
         NfsPathTextBox.Text = "/";
         SaveMountConfigurationsCheckBox.IsChecked = App.MountService.SaveMountPointConfigurations;
+        PersistMemoryFsOnExitCheckBox.IsChecked = App.MountService.PersistMemoryFileSystemOnExit;
+        PersistMemoryFsPathTextBox.Text = App.MountService.MemoryFileSystemPersistPath;
+        PersistMemoryFsPathTextBox.IsEnabled = App.MountService.PersistMemoryFileSystemOnExit;
 
         RefreshMountsFromService();
         UpdateProviderPanels();
@@ -201,6 +204,21 @@ public sealed partial class MainWindow : Window, INotifyPropertyChanged
         SetStatus(enabled
             ? "Mount point configurations will be saved."
             : "Mount point configurations will remain in-memory only.");
+    }
+
+    private void PersistMemoryFsSettings_Changed(object sender, RoutedEventArgs e)
+    {
+        bool enabled = PersistMemoryFsOnExitCheckBox.IsChecked is true;
+        string path = PersistMemoryFsPathTextBox.Text;
+        PersistMemoryFsPathTextBox.IsEnabled = enabled;
+        App.MountService.SetMemoryFileSystemPersistenceOptions(enabled, path);
+
+        if (_isInitializing)
+            return;
+
+        SetStatus(enabled
+            ? $"In-memory filesystem files will be exported on exit to: {App.MountService.MemoryFileSystemPersistPath}"
+            : "In-memory filesystem export on exit is disabled.");
     }
 
     private void UpdateProviderPanels()

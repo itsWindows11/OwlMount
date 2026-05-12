@@ -1,6 +1,7 @@
 using System.Runtime.Versioning;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using OwlCore.Storage;
 using OwlMount.Core.Cache;
 using OwlMount.Core.Registry;
@@ -23,6 +24,9 @@ public sealed class MountService : IDisposable
     private readonly object _lock = new();
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
     private const string ConfigurationFileName = "mount-configurations.json";
+    private static readonly Regex InvalidFileNameCharsRegex =
+        new($"[{Regex.Escape(new string(Path.GetInvalidFileNameChars()))}]",
+            RegexOptions.CultureInvariant | RegexOptions.Compiled);
 
     public MountService()
     {
@@ -49,6 +53,15 @@ public sealed class MountService : IDisposable
     {
         get { lock (_lock) { return [.. _mountConfigurations.Values]; } }
     }
+
+    /// <summary>
+    /// Gets whether in-memory provider files should be exported to disk when the app exits.
+    /// Defaults to <c>false</c>.
+    /// </summary>
+    public bool PersistMemoryFileSystemOnExit { get; private set; }
+
+    /// <summary>Target directory for exported in-memory filesystem content.</summary>
+    public string MemoryFileSystemPersistPath { get; private set; } = GetDefaultMemoryPersistPath();
 
     /// <summary>
     /// Builds the provider root and starts the VFS backend for <paramref name="opts"/>.
@@ -161,6 +174,7 @@ public sealed class MountService : IDisposable
             Provider = normalizedOpts.Provider,
             BackendName = normalizedOpts.Backend,
             IsReadOnly = isReadOnly,
+            RootFolder = pr.Root,
             BackendInstance = backend,
             ExtraDisposable = pr.ExtraDisposable,
         };
@@ -242,6 +256,17 @@ public sealed class MountService : IDisposable
         PersistConfigurationState();
     }
 
+    /// <summary>Updates in-memory filesystem persistence options.</summary>
+    public void SetMemoryFileSystemPersistenceOptions(bool enabled, string? path)
+    {
+        lock (_lock)
+        {
+            PersistMemoryFileSystemOnExit = enabled;
+            MemoryFileSystemPersistPath = NormalizePersistPath(path);
+        }
+        PersistConfigurationState();
+    }
+
     /// <summary>
     /// Attempts to mount all currently known configurations.
     /// Used at app startup to restore persisted mount points when enabled.
@@ -264,6 +289,50 @@ public sealed class MountService : IDisposable
         }
 
         return (successCount, failures);
+    }
+
+    /// <summary>
+    /// Exports all currently mounted in-memory provider roots to disk when enabled.
+    /// </summary>
+    public async Task<IReadOnlyList<string>> PersistMemoryFileSystemsAsync(CancellationToken ct = default)
+    {
+        bool enabled;
+        string targetBasePath;
+        List<(string DriveLetter, IFolder RootFolder)> memoryMounts;
+
+        lock (_lock)
+        {
+            enabled = PersistMemoryFileSystemOnExit;
+            targetBasePath = MemoryFileSystemPersistPath;
+            memoryMounts = [.. _mounts.Values
+                .Where(m => m.Provider.Equals("memory", StringComparison.OrdinalIgnoreCase))
+                .Select(m => (m.DriveLetter, m.RootFolder))];
+        }
+
+        if (!enabled || memoryMounts.Count == 0)
+            return [];
+
+        var failures = new List<string>();
+        Directory.CreateDirectory(targetBasePath);
+
+        foreach ((string driveLetter, IFolder rootFolder) in memoryMounts)
+        {
+            string mountDir = Path.Combine(targetBasePath, SanitizePathSegment(driveLetter.TrimEnd(':')));
+            try
+            {
+                if (Directory.Exists(mountDir))
+                    Directory.Delete(mountDir, recursive: true);
+
+                Directory.CreateDirectory(mountDir);
+                await ExportFolderToDirectoryAsync(rootFolder, mountDir, ct);
+            }
+            catch (Exception ex)
+            {
+                failures.Add($"{driveLetter}: {ex.Message}");
+            }
+        }
+
+        return failures;
     }
 
     private static void StopMount(ActiveMount mount)
@@ -328,6 +397,51 @@ public sealed class MountService : IDisposable
         return Path.Combine(dir, ConfigurationFileName);
     }
 
+    private static string GetDefaultMemoryPersistPath() =>
+        Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "OwlMount",
+            "WinUI",
+            "MemoryProviderExports");
+
+    private static string NormalizePersistPath(string? path) =>
+        string.IsNullOrWhiteSpace(path) ? GetDefaultMemoryPersistPath() : path.Trim();
+
+    private static string SanitizePathSegment(string name)
+    {
+        string sanitized = InvalidFileNameCharsRegex.Replace(name, "_");
+        return string.IsNullOrWhiteSpace(sanitized) ? "_" : sanitized;
+    }
+
+    private static async Task ExportFolderToDirectoryAsync(
+        IFolder source,
+        string targetDirectory,
+        CancellationToken ct)
+    {
+        await foreach (IStorableChild child in source.GetItemsAsync().WithCancellation(ct))
+        {
+            string childPath = Path.Combine(targetDirectory, SanitizePathSegment(child.Name));
+
+            if (child is IFolder folder)
+            {
+                Directory.CreateDirectory(childPath);
+                await ExportFolderToDirectoryAsync(folder, childPath, ct);
+            }
+            else if (child is IFile file)
+            {
+                await using Stream sourceStream = await file.OpenStreamAsync(FileAccess.Read, ct);
+                await using var destinationStream = new FileStream(
+                    childPath,
+                    FileMode.Create,
+                    FileAccess.Write,
+                    FileShare.None,
+                    bufferSize: 81920,
+                    useAsync: true);
+                await sourceStream.CopyToAsync(destinationStream, ct);
+            }
+        }
+    }
+
     private void LoadConfigurationState()
     {
         try
@@ -342,6 +456,8 @@ public sealed class MountService : IDisposable
                 return;
 
             SaveMountPointConfigurations = state.SaveMountPointConfigurations;
+            PersistMemoryFileSystemOnExit = state.PersistMemoryFileSystemOnExit;
+            MemoryFileSystemPersistPath = NormalizePersistPath(state.MemoryFileSystemPersistPath);
             _mountConfigurations.Clear();
 
             foreach (ProviderOptions opts in state.MountPoints)
@@ -368,6 +484,8 @@ public sealed class MountService : IDisposable
                 state = new MountConfigurationState
                 {
                     SaveMountPointConfigurations = SaveMountPointConfigurations,
+                    PersistMemoryFileSystemOnExit = PersistMemoryFileSystemOnExit,
+                    MemoryFileSystemPersistPath = MemoryFileSystemPersistPath,
                     MountPoints = SaveMountPointConfigurations
                         ? [.. _mountConfigurations.Values]
                         : [],
@@ -392,6 +510,8 @@ public sealed class MountService : IDisposable
 internal sealed class MountConfigurationState
 {
     public bool SaveMountPointConfigurations { get; init; } = true;
+    public bool PersistMemoryFileSystemOnExit { get; init; }
+    public string? MemoryFileSystemPersistPath { get; init; }
     public List<ProviderOptions> MountPoints { get; init; } = [];
 }
 
@@ -404,6 +524,7 @@ public sealed class ActiveMount
     public required string Provider { get; init; }
     public required string BackendName { get; init; }
     public required bool IsReadOnly { get; init; }
+    internal required IFolder RootFolder { get; init; }
     internal required IOwlMountBackend BackendInstance { get; init; }
     internal IDisposable? ExtraDisposable { get; init; }
 }

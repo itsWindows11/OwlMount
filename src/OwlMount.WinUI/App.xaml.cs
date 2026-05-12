@@ -199,6 +199,16 @@ public partial class App : Application
     /// </summary>
     internal void ExitApp()
     {
+        IReadOnlyList<string> exportFailures = [];
+        try
+        {
+            exportFailures = MountService.PersistMemoryFileSystemsAsync().GetAwaiter().GetResult();
+        }
+        catch
+        {
+            // best-effort export
+        }
+
         MountService.UnmountAll();
         MountService.Dispose();
 
@@ -218,6 +228,8 @@ public partial class App : Application
         {
             if (_window is not null)
                 _window.AppWindow.Closing -= OnWindowClosing;
+            if (exportFailures.Count > 0)
+                _window?.SetExternalStatus($"In-memory filesystem export failures: {string.Join(" | ", exportFailures)}");
             Current.Exit();
         });
     }

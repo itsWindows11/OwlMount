@@ -157,6 +157,16 @@
                     IsChecked="True"
                     Checked="SaveMountConfigurationsCheckBox_Changed"
                     Unchecked="SaveMountConfigurationsCheckBox_Changed" />
+                <CheckBox
+                    x:Name="PersistMemoryFsOnExitCheckBox"
+                    Content="Persist in-memory filesystem files on exit"
+                    IsChecked="False"
+                    Checked="PersistMemoryFsSettings_Changed"
+                    Unchecked="PersistMemoryFsSettings_Changed" />
+                <TextBox
+                    x:Name="PersistMemoryFsPathTextBox"
+                    PlaceholderText="Path for in-memory filesystem export"
+                    LostFocus="PersistMemoryFsSettings_Changed" />
 
                 <Expander x:Name="LocalOrArchiveExpander" Header="Local/Archive" HorizontalAlignment="Stretch" IsExpanded="True">
                     <StackPanel Spacing="8" Padding="0,8,0,0">

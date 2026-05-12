@@ -63,6 +63,7 @@ dotnet run --project src/OwlMount.WinUI/OwlMount.WinUI.csproj
 The GUI performs all mount and unmount operations in-process via the shared `OwlMount.Core.Windows` library — no CLI subprocess is spawned.
 It supports mounting to multiple drive letters in one action by entering a comma-separated list.
 Closing the window minimizes the app to the system tray; right-click the tray icon to unmount drives or exit.
+It includes a default-on setting to persist mount-point configurations, plus an optional setting to export in-memory provider files to a chosen folder when exiting.
 
 ### Mount options
 
