@@ -61,6 +61,7 @@ dotnet run --project src/OwlMount.WinUI/OwlMount.WinUI.csproj
 ```
 
 The GUI currently invokes the existing `owlmount` CLI under the hood, so backend/provider behavior stays aligned with the console app.
+It supports mounting to multiple drive letters in one action by entering a comma-separated list.
 
 ### Mount options
 
