@@ -6,17 +6,98 @@
     xmlns:local="using:OwlMount.WinUI"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     mc:Ignorable="d"
-    Title="OwlMount GUI">
+    Title="OwlMount">
 
-    <Grid>
-        <ScrollViewer>
+    <Window.Resources>
+        <!--
+            Shared DataTemplate for both the inline list (narrow/normal) and the
+            side panel (wide). Star columns keep it readable at any list width.
+        -->
+        <DataTemplate x:Key="MountItemTemplate" x:DataType="local:MountEntry">
+            <Grid ColumnSpacing="8">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" MinWidth="44" />
+                    <ColumnDefinition Width="2*" />
+                    <ColumnDefinition Width="Auto" MinWidth="70" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <TextBlock Grid.Column="0" Text="{x:Bind DriveLetter}" FontWeight="SemiBold" />
+                <TextBlock Grid.Column="1" Text="{x:Bind Label}" TextTrimming="CharacterEllipsis" />
+                <TextBlock Grid.Column="2" Text="{x:Bind Provider}" />
+                <TextBlock Grid.Column="3" Text="{x:Bind State}" Opacity="0.75" />
+            </Grid>
+        </DataTemplate>
+    </Window.Resources>
+
+    <!--
+        RootGrid has two columns:
+          FormColumn   – always visible, contains the scrollable configuration form
+          MountsPanelColumn – width=0 in narrow/normal; grows to * in wide mode
+
+        VisualStateManager drives three responsive breakpoints.
+    -->
+    <Grid x:Name="RootGrid">
+        <VisualStateManager.VisualStateGroups>
+            <VisualStateGroup x:Name="LayoutStates">
+
+                <!-- Narrow: < 560 px — compact labels, stacked buttons, inline mount list -->
+                <VisualState x:Name="NarrowState">
+                    <VisualState.StateTriggers>
+                        <AdaptiveTrigger MinWindowWidth="0" />
+                    </VisualState.StateTriggers>
+                    <VisualState.Setters>
+                        <Setter Target="LabelColumn.Width" Value="Auto" />
+                        <Setter Target="ActionButtonsPanel.Orientation" Value="Vertical" />
+                    </VisualState.Setters>
+                </VisualState>
+
+                <!-- Normal: 560–899 px — fixed-width labels, horizontal buttons, inline list -->
+                <VisualState x:Name="NormalState">
+                    <VisualState.StateTriggers>
+                        <AdaptiveTrigger MinWindowWidth="560" />
+                    </VisualState.StateTriggers>
+                    <VisualState.Setters>
+                        <Setter Target="LabelColumn.Width" Value="160" />
+                        <Setter Target="ActionButtonsPanel.Orientation" Value="Horizontal" />
+                    </VisualState.Setters>
+                </VisualState>
+
+                <!-- Wide: ≥ 900 px — two-column layout; mounts panel slides in on the right -->
+                <VisualState x:Name="WideState">
+                    <VisualState.StateTriggers>
+                        <AdaptiveTrigger MinWindowWidth="900" />
+                    </VisualState.StateTriggers>
+                    <VisualState.Setters>
+                        <Setter Target="LabelColumn.Width" Value="160" />
+                        <Setter Target="ActionButtonsPanel.Orientation" Value="Horizontal" />
+                        <Setter Target="FormColumn.Width" Value="460" />
+                        <Setter Target="MountsPanelColumn.Width" Value="*" />
+                        <Setter Target="SideMountsPanel.Visibility" Value="Visible" />
+                        <Setter Target="InlineMountsSection.Visibility" Value="Collapsed" />
+                    </VisualState.Setters>
+                </VisualState>
+
+            </VisualStateGroup>
+        </VisualStateManager.VisualStateGroups>
+
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition x:Name="FormColumn" Width="*" MinWidth="280" />
+            <ColumnDefinition x:Name="MountsPanelColumn" Width="0" />
+        </Grid.ColumnDefinitions>
+
+        <!-- ── Form column (always visible) ───────────────────────────────── -->
+        <ScrollViewer Grid.Column="0">
             <StackPanel Spacing="16" Padding="20">
                 <TextBlock Text="OwlMount" FontSize="28" FontWeight="SemiBold" />
-                <TextBlock Text="Mount OwlCore.Storage providers as Windows drives with a GUI." Opacity="0.75" TextWrapping="Wrap" />
+                <TextBlock
+                    Text="Mount OwlCore.Storage providers as Windows drive letters."
+                    Opacity="0.75"
+                    TextWrapping="Wrap" />
 
+                <!-- Provider / backend options -->
                 <Grid ColumnSpacing="12" RowSpacing="10">
                     <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="220" />
+                        <ColumnDefinition x:Name="LabelColumn" Width="160" />
                         <ColumnDefinition Width="*" />
                     </Grid.ColumnDefinitions>
                     <Grid.RowDefinitions>
@@ -27,7 +108,11 @@
                     </Grid.RowDefinitions>
 
                     <TextBlock Grid.Row="0" Grid.Column="0" VerticalAlignment="Center" Text="Provider" />
-                    <ComboBox x:Name="ProviderComboBox" Grid.Row="0" Grid.Column="1" SelectionChanged="ProviderComboBox_SelectionChanged">
+                    <ComboBox
+                        x:Name="ProviderComboBox"
+                        Grid.Row="0" Grid.Column="1"
+                        HorizontalAlignment="Stretch"
+                        SelectionChanged="ProviderComboBox_SelectionChanged">
                         <ComboBoxItem Content="memory" />
                         <ComboBoxItem Content="archive" />
                         <ComboBoxItem Content="local" />
@@ -39,7 +124,10 @@
                     </ComboBox>
 
                     <TextBlock Grid.Row="1" Grid.Column="0" VerticalAlignment="Center" Text="Backend" />
-                    <ComboBox x:Name="BackendComboBox" Grid.Row="1" Grid.Column="1">
+                    <ComboBox
+                        x:Name="BackendComboBox"
+                        Grid.Row="1" Grid.Column="1"
+                        HorizontalAlignment="Stretch">
                         <ComboBoxItem Content="winfsp" />
                         <ComboBoxItem Content="projfs" />
                     </ComboBox>
@@ -53,14 +141,14 @@
 
                 <CheckBox x:Name="ReadOnlyCheckBox" Content="Read-only" />
 
-                <Expander x:Name="LocalOrArchiveExpander" Header="Local/Archive" IsExpanded="True">
+                <Expander x:Name="LocalOrArchiveExpander" Header="Local/Archive" HorizontalAlignment="Stretch" IsExpanded="True">
                     <StackPanel Spacing="8" Padding="0,8,0,0">
                         <TextBox x:Name="PathTextBox" PlaceholderText="--path (local)" />
                         <TextBox x:Name="ArchiveFileTextBox" PlaceholderText="--archive-file (archive)" />
                     </StackPanel>
                 </Expander>
 
-                <Expander x:Name="KuboExpander" Header="Kubo" IsExpanded="False">
+                <Expander x:Name="KuboExpander" Header="Kubo" HorizontalAlignment="Stretch" IsExpanded="False">
                     <StackPanel Spacing="8" Padding="0,8,0,0">
                         <TextBox x:Name="ApiUrlTextBox" PlaceholderText="--api-url (optional)" />
                         <TextBox x:Name="CidTextBox" PlaceholderText="--cid (kubo-ipfs)" />
@@ -68,7 +156,7 @@
                     </StackPanel>
                 </Expander>
 
-                <Expander x:Name="S3Expander" Header="Amazon S3" IsExpanded="False">
+                <Expander x:Name="S3Expander" Header="Amazon S3" HorizontalAlignment="Stretch" IsExpanded="False">
                     <StackPanel Spacing="8" Padding="0,8,0,0">
                         <TextBox x:Name="S3BucketTextBox" PlaceholderText="--bucket" />
                         <TextBox x:Name="S3PrefixTextBox" PlaceholderText="--prefix (optional)" />
@@ -79,7 +167,7 @@
                     </StackPanel>
                 </Expander>
 
-                <Expander x:Name="NfsExpander" Header="NFS" IsExpanded="False">
+                <Expander x:Name="NfsExpander" Header="NFS" HorizontalAlignment="Stretch" IsExpanded="False">
                     <StackPanel Spacing="8" Padding="0,8,0,0">
                         <TextBox x:Name="NfsHostTextBox" PlaceholderText="--host" />
                         <TextBox x:Name="NfsExportTextBox" PlaceholderText="--export" />
@@ -87,36 +175,73 @@
                     </StackPanel>
                 </Expander>
 
-                <StackPanel Orientation="Horizontal" Spacing="10">
+                <!-- Action buttons — Orientation switches via VisualStateManager -->
+                <StackPanel x:Name="ActionButtonsPanel" Orientation="Horizontal" Spacing="8">
                     <Button Content="Mount" Click="MountButton_Click" />
                     <Button Content="Refresh" Click="RefreshButton_Click" />
                     <Button Content="Unmount selected" Click="UnmountSelectedButton_Click" />
                     <Button Content="Exit" Click="ExitButton_Click" />
                 </StackPanel>
 
-                <TextBlock Text="Active mounts" FontSize="18" FontWeight="SemiBold" />
-                <ListView x:Name="MountsListView" Height="180" SelectionMode="Multiple" ItemsSource="{x:Bind Mounts}">
-                    <ListView.ItemTemplate>
-                        <DataTemplate x:DataType="local:MountEntry">
-                            <Grid ColumnSpacing="12">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="60" />
-                                    <ColumnDefinition Width="160" />
-                                    <ColumnDefinition Width="100" />
-                                    <ColumnDefinition Width="*" />
-                                </Grid.ColumnDefinitions>
-                                <TextBlock Grid.Column="0" Text="{x:Bind DriveLetter}" FontWeight="SemiBold" />
-                                <TextBlock Grid.Column="1" Text="{x:Bind Label}" />
-                                <TextBlock Grid.Column="2" Text="{x:Bind Provider}" />
-                                <TextBlock Grid.Column="3" Text="{x:Bind State}" />
-                            </Grid>
-                        </DataTemplate>
-                    </ListView.ItemTemplate>
-                </ListView>
-
-                <TextBlock Text="{x:Bind StatusMessage, Mode=OneWay}" TextWrapping="Wrap" Opacity="0.85" />
-                <TextBlock Text="Tip: closing this window minimizes OwlMount to the system tray." Opacity="0.55" FontSize="12" />
+                <!--
+                    Inline mounts section — visible in narrow/normal mode.
+                    Hidden in wide mode; the side panel takes over.
+                -->
+                <StackPanel x:Name="InlineMountsSection" Spacing="8">
+                    <TextBlock Text="Active mounts" FontSize="18" FontWeight="SemiBold" />
+                    <ListView
+                        x:Name="MountsListView"
+                        MinHeight="80"
+                        SelectionMode="Multiple"
+                        ItemsSource="{x:Bind Mounts}"
+                        ItemTemplate="{StaticResource MountItemTemplate}" />
+                    <TextBlock Text="{x:Bind StatusMessage, Mode=OneWay}" TextWrapping="Wrap" Opacity="0.85" />
+                    <TextBlock Text="Tip: closing this window minimizes OwlMount to the system tray." Opacity="0.55" FontSize="12" />
+                </StackPanel>
             </StackPanel>
         </ScrollViewer>
+
+        <!-- ── Side mounts panel (wide mode only, MountsPanelColumn) ───────── -->
+        <Grid
+            x:Name="SideMountsPanel"
+            Grid.Column="1"
+            Visibility="Collapsed"
+            Padding="12,20,20,20">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <TextBlock
+                Grid.Row="0"
+                Text="Active mounts"
+                FontSize="18"
+                FontWeight="SemiBold"
+                Margin="0,0,0,8" />
+
+            <ListView
+                Grid.Row="1"
+                x:Name="MountsListViewSide"
+                SelectionMode="Multiple"
+                ItemsSource="{x:Bind Mounts}"
+                ItemTemplate="{StaticResource MountItemTemplate}" />
+
+            <TextBlock
+                Grid.Row="2"
+                Margin="0,8,0,0"
+                Text="{x:Bind StatusMessage, Mode=OneWay}"
+                TextWrapping="Wrap"
+                Opacity="0.85" />
+
+            <TextBlock
+                Grid.Row="3"
+                Text="Tip: closing this window minimizes OwlMount to the system tray."
+                Opacity="0.55"
+                FontSize="12" />
+        </Grid>
+
     </Grid>
 </Window>
+

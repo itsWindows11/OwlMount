@@ -148,7 +148,14 @@ public sealed partial class MainWindow : Window, INotifyPropertyChanged
 
     private void UnmountSelectedButton_Click(object sender, RoutedEventArgs e)
     {
-        List<MountEntry> selected = MountsListView.SelectedItems.Cast<MountEntry>().ToList();
+        // Union selections from both the inline list (narrow/normal) and the
+        // side panel (wide mode) so the button works regardless of layout state.
+        List<MountEntry> selected = MountsListView.SelectedItems
+            .Cast<MountEntry>()
+            .Concat(MountsListViewSide.SelectedItems.Cast<MountEntry>())
+            .Distinct()
+            .ToList();
+
         if (selected.Count == 0)
         {
             SetStatus("Select one or more active mounts first.");
