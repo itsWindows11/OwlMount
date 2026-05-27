@@ -1,47 +1,62 @@
 using System.Drawing;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using OwlMount.WinUI.Services;
-using WinForms = System.Windows.Forms;
 
 namespace OwlMount.WinUI;
 
 public partial class App : Application
 {
-    // ── Shared singleton ──────────────────────────────────────────────────────
-
-    /// <summary>
-    /// In-process mount manager. Created once for the lifetime of the application.
-    /// </summary>
-    public static MountService MountService { get; } = new MountService();
+    public IServiceProvider Services { get; }
+    public MountService MountService => Services.GetRequiredService<MountService>();
+    public AppSettingsService AppSettings => Services.GetRequiredService<AppSettingsService>();
+    public IAppExitService AppExitService => Services.GetRequiredService<IAppExitService>();
+    public IAppTrayService AppTrayService => Services.GetRequiredService<IAppTrayService>();
 
     // ── Private state ─────────────────────────────────────────────────────────
 
     private MainWindow? _window;
-
-    /// <summary>
-    /// Invisible WinForms form that hosts the Win32 message pump required by
-    /// <see cref="WinForms.NotifyIcon"/>. Used for cross-thread Invoke.
-    /// </summary>
-    private WinForms.Form? _trayPump;
-    private WinForms.NotifyIcon? _trayIcon;
 
     // ── Application lifecycle ─────────────────────────────────────────────────
 
     public App()
     {
         InitializeComponent();
+
+        var services = new ServiceCollection();
+        services.AddSingleton<MountService>();
+        services.AddSingleton<AppSettingsService>();
+        services.AddSingleton<LocalLogService>();
+        services.AddSingleton<AppExitService>();
+        services.AddSingleton<IAppExitService>(sp => sp.GetRequiredService<AppExitService>());
+        services.AddSingleton<IAppTrayService, AppTrayService>();
+        services.AddSingleton<INavigationService, NavigationService>();
+        services.AddSingleton(sp => new MainWindowViewModel(
+            sp.GetRequiredService<MountService>(),
+            sp.GetRequiredService<IAppExitService>(),
+            sp.GetRequiredService<INavigationService>(),
+            sp.GetRequiredService<LocalLogService>()));
+        services.AddSingleton(sp => new Views.SettingsPageViewModel(
+            sp.GetRequiredService<MountService>(),
+            sp.GetRequiredService<AppSettingsService>(),
+            sp.GetRequiredService<LocalLogService>()));
+        services.AddSingleton<MainWindow>();
+        Services = services.BuildServiceProvider();
     }
 
     protected override void OnLaunched(LaunchActivatedEventArgs args)
     {
+        AppExitService.SetExitAction(ExitApp);
         MountService.MountsChanged += OnMountsChanged;
+        _ = Services.GetRequiredService<LocalLogService>().InfoAsync("Application launched.");
 
-        _window = new MainWindow();
+        _window = Services.GetRequiredService<MainWindow>();
         _window.AppWindow.Closing += OnWindowClosing;
         _window.Activate();
 
-        StartTrayThread();
+        AppTrayService.Initialize(ShowWindow, ExitApp);
+        AppTrayService.Start();
         _ = RestoreConfiguredMountsAsync();
     }
 
@@ -52,109 +67,12 @@ public partial class App : Application
         sender.Hide();
     }
 
-    // ── Tray thread ───────────────────────────────────────────────────────────
-
-    private void StartTrayThread()
-    {
-        var thread = new Thread(() =>
-        {
-            // An invisible Form provides both the Win32 message pump that
-            // NotifyIcon needs and the Invoke() method for cross-thread marshaling.
-            _trayPump = new WinForms.Form
-            {
-                Text = "OwlMount Tray Pump",
-                ShowInTaskbar = false,
-                WindowState = WinForms.FormWindowState.Minimized,
-                FormBorderStyle = WinForms.FormBorderStyle.None,
-                Size = new Size(1, 1),
-            };
-
-            _trayPump.Load += (_, _) =>
-            {
-                _trayPump.Hide();
-
-                Icon icon;
-                try
-                {
-                    icon = Icon.ExtractAssociatedIcon(
-                        Environment.ProcessPath
-                        ?? System.Reflection.Assembly.GetExecutingAssembly().Location)
-                        ?? SystemIcons.Application;
-                }
-                catch
-                {
-                    icon = SystemIcons.Application;
-                }
-
-                _trayIcon = new WinForms.NotifyIcon
-                {
-                    Text = "OwlMount",
-                    Icon = icon,
-                    Visible = true,
-                    ContextMenuStrip = BuildContextMenu(),
-                };
-
-                _trayIcon.MouseDoubleClick += (_, _) => ShowWindow();
-            };
-
-            WinForms.Application.Run(_trayPump);
-        });
-
-        thread.SetApartmentState(ApartmentState.STA);
-        thread.IsBackground = true;
-        thread.Name = "OwlMount-Tray";
-        thread.Start();
-    }
-
-    /// <summary>Builds a fresh context-menu reflecting current mount state.</summary>
-    private WinForms.ContextMenuStrip BuildContextMenu()
-    {
-        var menu = new WinForms.ContextMenuStrip();
-
-        var openItem = new WinForms.ToolStripMenuItem("Open OwlMount")
-        {
-            Font = new Font(SystemFonts.DefaultFont, FontStyle.Bold),
-        };
-        openItem.Click += (_, _) => ShowWindow();
-        menu.Items.Add(openItem);
-        menu.Items.Add(new WinForms.ToolStripSeparator());
-
-        IReadOnlyList<ActiveMount> mounts = MountService.ActiveMounts;
-        foreach (ActiveMount m in mounts)
-        {
-            string letter = m.DriveLetter;
-            var item = new WinForms.ToolStripMenuItem(
-                $"Unmount {letter}  ({m.Provider})");
-            item.Click += (_, _) => MountService.Unmount(letter);
-            menu.Items.Add(item);
-        }
-
-        if (mounts.Count > 0)
-        {
-            menu.Items.Add(new WinForms.ToolStripSeparator());
-        }
-
-        var exitItem = new WinForms.ToolStripMenuItem("Exit");
-        exitItem.Click += (_, _) => ExitApp();
-        menu.Items.Add(exitItem);
-
-        return menu;
-    }
-
     // ── Cross-thread helpers ──────────────────────────────────────────────────
 
     private void OnMountsChanged(object? sender, EventArgs e)
     {
-        // Update tray icon tooltip and context menu on the tray thread.
-        InvokeTray(() =>
-        {
-            if (_trayIcon is null) return;
-            int count = MountService.ActiveMounts.Count;
-            _trayIcon.Text = count > 0 ? $"OwlMount — {count} mount(s)" : "OwlMount";
-            var old = _trayIcon.ContextMenuStrip;
-            _trayIcon.ContextMenuStrip = BuildContextMenu();
-            old?.Dispose();
-        });
+        AppTrayService.NotifyMountsChanged();
+        _ = Services.GetRequiredService<LocalLogService>().InfoAsync("Mounts changed.");
 
         // Refresh the main window's mount list on the WinUI dispatcher.
         _window?.DispatcherQueue.TryEnqueue(() => _window.RefreshMountsFromService());
@@ -180,15 +98,18 @@ public partial class App : Application
             if (successCount > 0 && failures.Count == 0)
             {
                 _window.SetExternalStatus($"Restored {successCount} saved mount point configuration(s).");
+                _ = Services.GetRequiredService<LocalLogService>().InfoAsync($"Restored {successCount} saved mount point configuration(s).");
             }
             else if (successCount > 0 && failures.Count > 0)
             {
                 _window.SetExternalStatus(
                     $"Restored {successCount} saved mount point configuration(s); failures: {string.Join(" | ", failures)}");
+                _ = Services.GetRequiredService<LocalLogService>().WarnAsync($"Restored {successCount} saved mount point configuration(s) with failures: {string.Join(" | ", failures)}");
             }
             else if (failures.Count > 0)
             {
                 _window.SetExternalStatus($"Failed to restore saved mount point configurations: {string.Join(" | ", failures)}");
+                _ = Services.GetRequiredService<LocalLogService>().ErrorAsync($"Failed to restore saved mount point configurations: {string.Join(" | ", failures)}");
             }
         });
     }
@@ -212,17 +133,8 @@ public partial class App : Application
         MountService.UnmountAll();
         MountService.Dispose();
 
-        InvokeTray(() =>
-        {
-            if (_trayIcon is not null)
-            {
-                _trayIcon.Visible = false;
-                _trayIcon.ContextMenuStrip?.Dispose();
-                _trayIcon.Dispose();
-                _trayIcon = null;
-            }
-            WinForms.Application.ExitThread();
-        });
+        AppTrayService.Dispose();
+        _ = Services.GetRequiredService<LocalLogService>().InfoAsync("Application exiting.");
 
         _window?.DispatcherQueue.TryEnqueue(() =>
         {
@@ -232,21 +144,5 @@ public partial class App : Application
                 _window?.SetExternalStatus($"In-memory filesystem export failures: {string.Join(" | ", exportFailures)}");
             Current.Exit();
         });
-    }
-
-    /// <summary>
-    /// Marshals <paramref name="action"/> onto the tray-pump thread. Falls back to
-    /// direct invocation when the pump handle isn't available yet.
-    /// </summary>
-    private void InvokeTray(Action action)
-    {
-        try
-        {
-            if (_trayPump is { IsHandleCreated: true })
-                _trayPump.Invoke(action);
-            else
-                action();
-        }
-        catch (ObjectDisposedException) { /* tray already torn down — ignore */ }
     }
 }

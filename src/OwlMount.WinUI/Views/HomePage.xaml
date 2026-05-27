@@ -1,0 +1,170 @@
+<Page
+    x:Class="OwlMount.WinUI.Views.HomePage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:local="using:OwlMount.WinUI"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d">
+
+    <Page.Resources>
+        <DataTemplate x:Key="MountItemTemplate" x:DataType="local:MountEntry">
+            <Border
+                x:Name="CardRoot"
+                Padding="16,12"
+                Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                BorderThickness="1"
+                CornerRadius="8">
+                <Border.Transitions>
+                    <TransitionCollection>
+                        <EntranceThemeTransition FromVerticalOffset="12" IsStaggeringEnabled="False" />
+                    </TransitionCollection>
+                </Border.Transitions>
+                <Grid ColumnSpacing="12">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <CheckBox
+                        Grid.Column="0"
+                        MinWidth="0"
+                        VerticalAlignment="Center"
+                        IsChecked="{x:Bind IsSelected, Mode=TwoWay}" />
+                    <StackPanel
+                        Grid.Column="1"
+                        VerticalAlignment="Center"
+                        Orientation="Horizontal"
+                        Spacing="6">
+                        <SymbolIcon Symbol="SaveLocal" />
+                        <TextBlock FontWeight="SemiBold" Text="{x:Bind DriveLetter}" />
+                    </StackPanel>
+                    <TextBlock
+                        Grid.Column="2"
+                        VerticalAlignment="Center"
+                        FontWeight="SemiBold"
+                        Text="{x:Bind Label}"
+                        TextTrimming="CharacterEllipsis"
+                        TextWrapping="NoWrap" />
+                    <TextBlock
+                        Grid.Column="3"
+                        VerticalAlignment="Center"
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        Text="{x:Bind ProviderDisplay}"
+                        TextTrimming="CharacterEllipsis"
+                        TextWrapping="NoWrap" />
+                    <TextBlock
+                        Grid.Column="4"
+                        VerticalAlignment="Center"
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        Text="{x:Bind Capacity}" />
+                    <TextBlock
+                        Grid.Column="5"
+                        VerticalAlignment="Center"
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        Text="{x:Bind State}" />
+                </Grid>
+                <VisualStateManager.VisualStateGroups>
+                    <VisualStateGroup x:Name="HoverStates">
+                        <VisualState x:Name="Normal" />
+                        <VisualState x:Name="PointerOver">
+                            <VisualState.Setters>
+                                <Setter Target="CardRoot.Background" Value="{ThemeResource CardBackgroundFillColorSecondaryBrush}" />
+                            </VisualState.Setters>
+                        </VisualState>
+                        <VisualState x:Name="Pressed">
+                            <VisualState.Setters>
+                                <Setter Target="CardRoot.Background" Value="{ThemeResource ControlFillColorTertiaryBrush}" />
+                            </VisualState.Setters>
+                        </VisualState>
+                    </VisualStateGroup>
+                </VisualStateManager.VisualStateGroups>
+            </Border>
+        </DataTemplate>
+    </Page.Resources>
+
+    <Grid Padding="20">
+        <ListView
+            x:Name="MountsListView"
+            MinHeight="120"
+            HorizontalContentAlignment="Stretch"
+            ItemTemplate="{StaticResource MountItemTemplate}"
+            ItemsSource="{x:Bind ViewModel.Mounts}"
+            SelectionMode="None">
+
+            <ListView.Header>
+                <StackPanel>
+                    <Grid ColumnSpacing="12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Spacing="4">
+                            <TextBlock
+                                FontSize="24"
+                                FontWeight="SemiBold"
+                                Text="Mounts" />
+                        </StackPanel>
+                        <Button
+                            Grid.Column="1"
+                            VerticalAlignment="Top"
+                            Command="{x:Bind ViewModel.AddMountCommand}"
+                            Content="Add mount" />
+                    </Grid>
+
+                    <TextBlock
+                        Margin="0,12,0,0"
+                        FontSize="18"
+                        FontWeight="SemiBold"
+                        Text="Active mounts" />
+                </StackPanel>
+            </ListView.Header>
+
+            <ListView.Footer>
+                <TextBlock
+                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                    Text="{x:Bind ViewModel.StatusMessage, Mode=OneWay}"
+                    TextWrapping="Wrap" />
+            </ListView.Footer>
+
+            <ListView.ItemContainerStyle>
+                <Style TargetType="ListViewItem">
+                    <Setter Property="Padding" Value="0" />
+                    <Setter Property="Margin" Value="0,0,0,8" />
+                    <Setter Property="MinHeight" Value="0" />
+                    <Setter Property="Background" Value="Transparent" />
+                    <Setter Property="BorderThickness" Value="0" />
+                    <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                </Style>
+            </ListView.ItemContainerStyle>
+        </ListView>
+
+        <StackPanel
+            x:Name="EmptyStatePanel"
+            Margin="0,24,0,24"
+            HorizontalAlignment="Center"
+            Spacing="10"
+            Visibility="Collapsed">
+            <SymbolIcon HorizontalAlignment="Center" Symbol="Folder" />
+            <TextBlock
+                HorizontalAlignment="Center"
+                FontSize="18"
+                FontWeight="SemiBold"
+                Text="No mounts yet" />
+            <TextBlock
+                Width="280"
+                HorizontalAlignment="Center"
+                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                Text="Create your first mount to see it listed here."
+                TextWrapping="Wrap" />
+            <Button
+                HorizontalAlignment="Center"
+                Command="{x:Bind ViewModel.AddMountCommand}"
+                Content="Add mount" />
+        </StackPanel>
+    </Grid>
+</Page>

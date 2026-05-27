@@ -1,0 +1,88 @@
+<Page
+    x:Class="OwlMount.WinUI.Views.SettingsPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:controls="using:CommunityToolkit.WinUI.Controls"
+    xmlns:converters="using:OwlMount.WinUI.Converters"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:x1="using:System"
+    mc:Ignorable="d">
+
+    <Page.Resources>
+        <converters:ElementThemeDisplayConverter x:Key="ElementThemeDisplayConverter" />
+    </Page.Resources>
+
+    <ScrollViewer>
+        <StackPanel Padding="20" Spacing="8">
+            <StackPanel.Transitions>
+                <TransitionCollection>
+                    <EntranceThemeTransition IsStaggeringEnabled="True" />
+                </TransitionCollection>
+            </StackPanel.Transitions>
+            <TextBlock
+                FontSize="24"
+                FontWeight="SemiBold"
+                Text="Settings" />
+
+            <!-- Hide the settings button when on the settings page by setting TitleBar footer visibility from code-behind -->
+
+            <controls:SettingsCard
+                Margin="0,12,0,0"
+                Header="Theme"
+                IsClickEnabled="False">
+                <ComboBox
+                    Width="180"
+                    HorizontalAlignment="Right"
+                    ItemsSource="{x:Bind ViewModel.ThemeOptions, Mode=OneWay}"
+                    SelectedItem="{x:Bind ViewModel.SelectedTheme, Mode=TwoWay}">
+                    <ComboBox.ItemTemplate>
+                        <DataTemplate x:DataType="x1:Object">
+                            <TextBlock Text="{Binding Converter={StaticResource ElementThemeDisplayConverter}}" />
+                        </DataTemplate>
+                    </ComboBox.ItemTemplate>
+                </ComboBox>
+            </controls:SettingsCard>
+
+            <controls:SettingsCard Header="Mount configuration persistence" IsClickEnabled="False">
+                <ToggleSwitch HorizontalAlignment="Right" IsOn="{x:Bind ViewModel.SaveMountConfigurations, Mode=TwoWay}" />
+            </controls:SettingsCard>
+
+            <controls:SettingsExpander
+                Description="Export memory-based files on exit."
+                Header="In-memory filesystem export"
+                IsExpanded="False">
+                <controls:SettingsExpander.Transitions>
+                    <TransitionCollection>
+                        <EntranceThemeTransition FromVerticalOffset="20" />
+                    </TransitionCollection>
+                </controls:SettingsExpander.Transitions>
+                <controls:SettingsExpander.Items>
+                    <controls:SettingsCard Header="Export path" IsClickEnabled="False">
+                        <StackPanel Orientation="Horizontal" Spacing="12">
+                            <TextBox
+                                x:Name="ExportPathBox"
+                                MaxWidth="256"
+                                IsEnabled="{x:Bind ViewModel.IsPersistMemoryFsPathEnabled, Mode=OneWay}"
+                                IsReadOnly="True"
+                                PlaceholderText="Export folder"
+                                Text="{x:Bind ViewModel.PersistMemoryFsPath, Mode=TwoWay}" />
+
+                            <Button
+                                Grid.Column="1"
+                                Command="{x:Bind ViewModel.BrowseExportPathCommand}"
+                                Content="Browse"
+                                IsEnabled="{x:Bind ViewModel.IsPersistMemoryFsPathEnabled, Mode=OneWay}" />
+                        </StackPanel>
+                    </controls:SettingsCard>
+                </controls:SettingsExpander.Items>
+
+                <ToggleSwitch IsOn="{x:Bind ViewModel.PersistMemoryFsOnExit, Mode=TwoWay}" />
+            </controls:SettingsExpander>
+
+            <controls:SettingsCard Description="{x:Bind ViewModel.AboutDescription, Mode=OneWay}" Header="About">
+                <HyperlinkButton Content="Project website" NavigateUri="{x:Bind ViewModel.ProjectUrl}" />
+            </controls:SettingsCard>
+        </StackPanel>
+    </ScrollViewer>
+</Page>

@@ -2,256 +2,113 @@
     x:Class="OwlMount.WinUI.MainWindow"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
-    xmlns:local="using:OwlMount.WinUI"
+    xmlns:animatedvisuals="using:Microsoft.UI.Xaml.Controls.AnimatedVisuals"
     xmlns:controls="using:CommunityToolkit.WinUI.Controls"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
-    mc:Ignorable="d"
-    Title="OwlMount">
+    Title="OwlMount"
+    mc:Ignorable="d">
 
-    <!--
-        RootGrid has two columns:
-          FormColumn   – always visible, contains the scrollable configuration form
-          MountsPanelColumn – width=0 in narrow/normal; grows to * in wide mode
-
-        VisualStateManager drives three responsive breakpoints.
-    -->
     <Grid x:Name="RootGrid">
-        <Grid.Resources>
-            <!--
-                Shared DataTemplate for both the inline list (narrow/normal) and the
-                side panel (wide). Star columns keep it readable at any list width.
-            -->
-            <DataTemplate x:Key="MountItemTemplate" x:DataType="local:MountEntry">
-                <Grid ColumnSpacing="8">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="Auto" MinWidth="56" />
-                        <ColumnDefinition Width="2*" />
-                        <ColumnDefinition Width="Auto" MinWidth="70" />
-                        <ColumnDefinition Width="*" />
-                    </Grid.ColumnDefinitions>
-                    <!-- Disk icon + drive letter -->
-                    <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
-                        <SymbolIcon Symbol="SaveLocal" />
-                        <TextBlock Text="{x:Bind DriveLetter}" FontWeight="SemiBold" VerticalAlignment="Center" />
-                    </StackPanel>
-                    <TextBlock Grid.Column="1" Text="{x:Bind Label}" TextTrimming="CharacterEllipsis" />
-                    <TextBlock Grid.Column="2" Text="{x:Bind Provider}" />
-                    <TextBlock Grid.Column="3" Text="{x:Bind State}" Opacity="0.75" />
-                </Grid>
-            </DataTemplate>
-        </Grid.Resources>
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
-        <VisualStateManager.VisualStateGroups>
-            <VisualStateGroup x:Name="LayoutStates">
-
-                <!-- Narrow: < 560 px — compact labels, stacked buttons, inline mount list -->
-                <VisualState x:Name="NarrowState">
-                    <VisualState.StateTriggers>
-                        <AdaptiveTrigger MinWindowWidth="0" />
-                    </VisualState.StateTriggers>
-                    <VisualState.Setters>
-                        <Setter Target="LabelColumn.Width" Value="Auto" />
-                        <Setter Target="ActionButtonsPanel.Orientation" Value="Vertical" />
-                    </VisualState.Setters>
-                </VisualState>
-
-                <!-- Normal: 560–899 px — fixed-width labels, horizontal buttons, inline list -->
-                <VisualState x:Name="NormalState">
-                    <VisualState.StateTriggers>
-                        <AdaptiveTrigger MinWindowWidth="560" />
-                    </VisualState.StateTriggers>
-                    <VisualState.Setters>
-                        <Setter Target="LabelColumn.Width" Value="160" />
-                        <Setter Target="ActionButtonsPanel.Orientation" Value="Horizontal" />
-                    </VisualState.Setters>
-                </VisualState>
-
-                <!-- Wide: ≥ 900 px — two-column layout; mounts panel slides in on the right -->
-                <VisualState x:Name="WideState">
-                    <VisualState.StateTriggers>
-                        <AdaptiveTrigger MinWindowWidth="900" />
-                    </VisualState.StateTriggers>
-                    <VisualState.Setters>
-                        <Setter Target="LabelColumn.Width" Value="160" />
-                        <Setter Target="ActionButtonsPanel.Orientation" Value="Horizontal" />
-                        <Setter Target="FormColumn.Width" Value="460" />
-                        <Setter Target="MountsPanelColumn.Width" Value="*" />
-                        <Setter Target="SideMountsPanel.Visibility" Value="Visible" />
-                        <Setter Target="InlineMountsSection.Visibility" Value="Collapsed" />
-                    </VisualState.Setters>
-                </VisualState>
-
-            </VisualStateGroup>
-        </VisualStateManager.VisualStateGroups>
-
-        <Grid.ColumnDefinitions>
-            <ColumnDefinition x:Name="FormColumn" Width="*" MinWidth="280" />
-            <ColumnDefinition x:Name="MountsPanelColumn" Width="0" />
-        </Grid.ColumnDefinitions>
 
         <controls:TitleBar
             x:Name="AppTitleBar"
-            Grid.Row="0"
-            Grid.ColumnSpan="2"
             Title="OwlMount"
-            Subtitle="Mount OwlCore.Storage providers as Windows drive letters."
+            Grid.Row="0"
+            BackButtonClick="AppTitleBar_BackButtonClick"
+            DisplayMode="Tall"
             IsBackButtonVisible="False"
-            IsPaneButtonVisible="False" />
-
-        <!-- ── Form column (always visible) ───────────────────────────────── -->
-        <ScrollViewer Grid.Row="1" Grid.Column="0">
-            <StackPanel Spacing="16" Padding="20">
-                <!-- Provider / backend options -->
-                <Grid ColumnSpacing="12" RowSpacing="10">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition x:Name="LabelColumn" Width="160" />
-                        <ColumnDefinition Width="*" />
-                    </Grid.ColumnDefinitions>
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                    </Grid.RowDefinitions>
-
-                    <TextBlock Grid.Row="0" Grid.Column="0" VerticalAlignment="Center" Text="Provider" />
-                    <ComboBox
-                        Grid.Row="0" Grid.Column="1"
-                        HorizontalAlignment="Stretch"
-                        ItemsSource="{x:Bind ViewModel.Providers}"
-                        SelectedItem="{x:Bind ViewModel.SelectedProvider, Mode=TwoWay}" />
-
-                    <TextBlock Grid.Row="1" Grid.Column="0" VerticalAlignment="Center" Text="Backend" />
-                    <ComboBox
-                        Grid.Row="1" Grid.Column="1"
-                        HorizontalAlignment="Stretch"
-                        ItemsSource="{x:Bind ViewModel.Backends}"
-                        SelectedItem="{x:Bind ViewModel.SelectedBackend, Mode=TwoWay}" />
-
-                    <TextBlock Grid.Row="2" Grid.Column="0" VerticalAlignment="Center" Text="Drive letters" />
-                    <TextBox Grid.Row="2" Grid.Column="1" PlaceholderText="M, R, X" Text="{x:Bind ViewModel.DriveLetters, Mode=TwoWay}" />
-
-                    <TextBlock Grid.Row="3" Grid.Column="0" VerticalAlignment="Center" Text="Label (optional)" />
-                    <TextBox Grid.Row="3" Grid.Column="1" PlaceholderText="OwlMount (Memory)" Text="{x:Bind ViewModel.Label, Mode=TwoWay}" />
-                </Grid>
-
-                <CheckBox Content="Read-only" IsChecked="{x:Bind ViewModel.ReadOnly, Mode=TwoWay}" IsEnabled="{x:Bind ViewModel.ReadOnlyEnabled, Mode=OneWay}" />
-                <CheckBox
-                    Content="Save mount point configurations"
-                    IsChecked="{x:Bind ViewModel.SaveMountConfigurations, Mode=TwoWay}" />
-                <CheckBox
-                    Content="Persist in-memory filesystem files on exit"
-                    IsChecked="{x:Bind ViewModel.PersistMemoryFsOnExit, Mode=TwoWay}" />
-                <TextBox
-                    PlaceholderText="Path for in-memory filesystem export"
-                    Text="{x:Bind ViewModel.PersistMemoryFsPath, Mode=TwoWay}"
-                    IsEnabled="{x:Bind ViewModel.PersistMemoryFsPathEnabled, Mode=OneWay}" />
-
-                <Expander Header="Local/Archive" HorizontalAlignment="Stretch" IsExpanded="True" Visibility="{x:Bind ViewModel.LocalOrArchiveVisibility, Mode=OneWay}">
-                    <StackPanel Spacing="8" Padding="0,8,0,0">
-                        <TextBox PlaceholderText="--path (local)" Text="{x:Bind ViewModel.Path, Mode=TwoWay}" />
-                        <TextBox PlaceholderText="--archive-file (archive)" Text="{x:Bind ViewModel.ArchiveFile, Mode=TwoWay}" />
-                    </StackPanel>
-                </Expander>
-
-                <Expander Header="Kubo" HorizontalAlignment="Stretch" IsExpanded="False" Visibility="{x:Bind ViewModel.KuboVisibility, Mode=OneWay}">
-                    <StackPanel Spacing="8" Padding="0,8,0,0">
-                        <TextBox PlaceholderText="--api-url (optional)" Text="{x:Bind ViewModel.ApiUrl, Mode=TwoWay}" />
-                        <TextBox PlaceholderText="--cid (kubo-ipfs)" Text="{x:Bind ViewModel.Cid, Mode=TwoWay}" />
-                        <TextBox PlaceholderText="--ipns (kubo-ipns)" Text="{x:Bind ViewModel.Ipns, Mode=TwoWay}" />
-                    </StackPanel>
-                </Expander>
-
-                <Expander Header="Amazon S3" HorizontalAlignment="Stretch" IsExpanded="False" Visibility="{x:Bind ViewModel.S3Visibility, Mode=OneWay}">
-                    <StackPanel Spacing="8" Padding="0,8,0,0">
-                        <TextBox PlaceholderText="--bucket" Text="{x:Bind ViewModel.S3Bucket, Mode=TwoWay}" />
-                        <TextBox PlaceholderText="--prefix (optional)" Text="{x:Bind ViewModel.S3Prefix, Mode=TwoWay}" />
-                        <TextBox PlaceholderText="--access-key (optional)" Text="{x:Bind ViewModel.S3AccessKey, Mode=TwoWay}" />
-                        <PasswordBox x:Name="S3SecretKeyTextBox" PlaceholderText="--secret-key (optional)" />
-                        <TextBox PlaceholderText="--region (optional)" Text="{x:Bind ViewModel.S3Region, Mode=TwoWay}" />
-                        <TextBox PlaceholderText="--endpoint (optional)" Text="{x:Bind ViewModel.S3Endpoint, Mode=TwoWay}" />
-                    </StackPanel>
-                </Expander>
-
-                <Expander Header="NFS" HorizontalAlignment="Stretch" IsExpanded="False" Visibility="{x:Bind ViewModel.NfsVisibility, Mode=OneWay}">
-                    <StackPanel Spacing="8" Padding="0,8,0,0">
-                        <TextBox PlaceholderText="--host" Text="{x:Bind ViewModel.NfsHost, Mode=TwoWay}" />
-                        <TextBox PlaceholderText="--export" Text="{x:Bind ViewModel.NfsExport, Mode=TwoWay}" />
-                        <TextBox PlaceholderText="--nfs-path (optional, default /)" Text="{x:Bind ViewModel.NfsPath, Mode=TwoWay}" />
-                    </StackPanel>
-                </Expander>
-
-                <!-- Action buttons — Orientation switches via VisualStateManager -->
-                <StackPanel x:Name="ActionButtonsPanel" Orientation="Horizontal" Spacing="8">
-                    <Button Content="Mount" Command="{x:Bind ViewModel.MountCommand}" />
-                    <Button Content="Refresh" Command="{x:Bind ViewModel.RefreshCommand}" />
-                    <Button Content="Unmount selected" Click="UnmountSelectedButton_Click" />
-                    <Button Content="Exit" Command="{x:Bind ViewModel.ExitCommand}" />
+            IsPaneButtonVisible="False">
+            <controls:TitleBar.Footer>
+                <StackPanel
+                    Padding="0,0,148,0"
+                    HorizontalAlignment="Right"
+                    Orientation="Horizontal"
+                    Spacing="4">
+                    <Button
+                        x:Name="SettingsButton"
+                        Width="28"
+                        Height="28"
+                        Padding="0"
+                        Background="Transparent"
+                        BorderThickness="0"
+                        Command="{x:Bind ViewModel.ShowSettingsCommand}"
+                        ToolTipService.ToolTip="Settings">
+                        <Button.Content>
+                            <AnimatedIcon
+                                x:Name="SettingsAnimatedIcon"
+                                Width="14"
+                                Height="14">
+                                <animatedvisuals:AnimatedSettingsVisualSource />
+                                <AnimatedIcon.FallbackIconSource>
+                                    <SymbolIconSource Symbol="Setting" />
+                                </AnimatedIcon.FallbackIconSource>
+                            </AnimatedIcon>
+                        </Button.Content>
+                    </Button>
                 </StackPanel>
-
-                <!--
-                    Inline mounts section — visible in narrow/normal mode.
-                    Hidden in wide mode; the side panel takes over.
-                -->
-                <StackPanel x:Name="InlineMountsSection" Spacing="8">
-                    <TextBlock Text="Active mounts" FontSize="18" FontWeight="SemiBold" />
-                    <ListView
-                        x:Name="MountsListView"
-                        MinHeight="80"
-                        SelectionMode="Multiple"
-                        ItemsSource="{x:Bind ViewModel.Mounts}"
-                        ItemTemplate="{StaticResource MountItemTemplate}" />
-                    <TextBlock Text="{x:Bind ViewModel.StatusMessage, Mode=OneWay}" TextWrapping="Wrap" Opacity="0.85" />
-                    <TextBlock Text="Tip: closing this window minimizes OwlMount to the system tray." Opacity="0.55" FontSize="12" />
-                </StackPanel>
-            </StackPanel>
-        </ScrollViewer>
-
-        <!-- ── Side mounts panel (wide mode only, MountsPanelColumn) ───────── -->
-        <Grid
-            x:Name="SideMountsPanel"
+            </controls:TitleBar.Footer>
+        </controls:TitleBar>
+        <Frame
+            x:Name="ContentFrame"
             Grid.Row="1"
-            Grid.Column="1"
-            Visibility="Collapsed"
-            Padding="12,20,20,20">
-            <Grid.RowDefinitions>
-                <RowDefinition Height="Auto" />
-                <RowDefinition Height="*" />
-                <RowDefinition Height="Auto" />
-                <RowDefinition Height="Auto" />
-            </Grid.RowDefinitions>
+            Background="{ThemeResource LayerFillColorDefaultBrush}" />
 
-            <TextBlock
-                Grid.Row="0"
-                Text="Active mounts"
-                FontSize="18"
-                FontWeight="SemiBold"
-                Margin="0,0,0,8" />
-
-            <ListView
-                Grid.Row="1"
-                x:Name="MountsListViewSide"
-                SelectionMode="Multiple"
-                ItemsSource="{x:Bind ViewModel.Mounts}"
-                ItemTemplate="{StaticResource MountItemTemplate}" />
-
-            <TextBlock
-                Grid.Row="2"
-                Margin="0,8,0,0"
-                Text="{x:Bind ViewModel.StatusMessage, Mode=OneWay}"
-                TextWrapping="Wrap"
-                Opacity="0.85" />
-
-            <TextBlock
-                Grid.Row="3"
-                Text="Tip: closing this window minimizes OwlMount to the system tray."
-                Opacity="0.55"
-                FontSize="12" />
-        </Grid>
-
+        <Border
+            x:Name="SelectionOverlay"
+            Grid.Row="1"
+            Margin="20,0,20,36"
+            Padding="12,10"
+            HorizontalAlignment="Stretch"
+            VerticalAlignment="Bottom"
+            Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+            BorderThickness="1"
+            CornerRadius="8"
+            IsHitTestVisible="False"
+            Opacity="0"
+            Visibility="Collapsed">
+            <Border.RenderTransform>
+                <TranslateTransform Y="8" />
+            </Border.RenderTransform>
+            <Grid ColumnSpacing="12">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <StackPanel
+                    Grid.Column="0"
+                    VerticalAlignment="Center"
+                    Orientation="Horizontal"
+                    Spacing="8">
+                    <FontIcon VerticalAlignment="Center" Glyph="&#xE8B7;" />
+                    <TextBlock VerticalAlignment="Center" FontWeight="SemiBold">
+                        <Run Text="{x:Bind ViewModel.SelectedMountCount, Mode=OneWay}" /><Run Text=" selected" />
+                    </TextBlock>
+                </StackPanel>
+                <StackPanel
+                    Grid.Column="2"
+                    Orientation="Horizontal"
+                    Spacing="8">
+                    <Button Command="{x:Bind ViewModel.EditSelectedCommand}">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <SymbolIcon Symbol="Edit" />
+                            <TextBlock Text="Edit" />
+                        </StackPanel>
+                    </Button>
+                    <Button Command="{x:Bind ViewModel.UnmountSelectedCommand}">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <SymbolIcon Symbol="Delete" />
+                            <TextBlock Text="Unmount" />
+                        </StackPanel>
+                    </Button>
+                </StackPanel>
+            </Grid>
+        </Border>
     </Grid>
 </Window>

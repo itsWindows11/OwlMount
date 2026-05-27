@@ -10,15 +10,20 @@
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <LangVersion>preview</LangVersion>
     <RestoreAdditionalProjectSources>https://pkgs.dev.azure.com/dotnet/CommunityToolkit/_packaging/CommunityToolkit-Labs/nuget/v3/index.json</RestoreAdditionalProjectSources>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="Microsoft.WindowsAppSDK" Version="2.0.1" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.0" />
     <PackageReference Include="CommunityToolkit.Labs.WinUI.TitleBar" Version="0.0.1-build.2206" />
+    <PackageReference Include="CommunityToolkit.WinUI.Controls.SettingsControls" Version="8.2.250402" />
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.0" />
     <!-- Provider packages (same versions as OwlMount.WinFspHost) -->
     <PackageReference Include="OwlCore.Kubo" Version="0.22.4" />
+    <PackageReference Include="OwlCore.Storage" Version="0.15.0" />
     <PackageReference Include="OwlCore.Storage.AmazonS3" Version="0.1.1" />
     <PackageReference Include="OwlCore.Storage.NfsSharp" Version="0.1.0" />
     <PackageReference Include="OwlCore.Storage.SharpCompress" Version="0.2.0" />
