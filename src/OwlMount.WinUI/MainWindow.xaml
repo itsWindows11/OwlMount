@@ -61,7 +61,7 @@
         <Border
             x:Name="SelectionOverlay"
             Grid.Row="1"
-            Margin="20,0,20,36"
+            Margin="20,0,20,48"
             Padding="12,10"
             HorizontalAlignment="Stretch"
             VerticalAlignment="Bottom"

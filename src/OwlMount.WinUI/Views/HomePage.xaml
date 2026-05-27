@@ -117,7 +117,7 @@
                     </Grid>
 
                     <TextBlock
-                        Margin="0,12,0,0"
+                        Margin="0,12,0,8"
                         FontSize="18"
                         FontWeight="SemiBold"
                         Text="Active mounts" />

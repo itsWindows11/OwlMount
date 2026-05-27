@@ -138,8 +138,7 @@ public partial class App : Application
 
         _window?.DispatcherQueue.TryEnqueue(() =>
         {
-            if (_window is not null)
-                _window.AppWindow.Closing -= OnWindowClosing;
+            _window?.AppWindow.Closing -= OnWindowClosing;
             if (exportFailures.Count > 0)
                 _window?.SetExternalStatus($"In-memory filesystem export failures: {string.Join(" | ", exportFailures)}");
             Current.Exit();
