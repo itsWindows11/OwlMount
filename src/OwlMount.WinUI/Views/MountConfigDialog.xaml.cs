@@ -9,6 +9,7 @@ namespace OwlMount.WinUI.Views;
 public sealed partial class MountConfigDialog : UserControl
 {
     private Window? _window;
+    private long _maxMemoryMb;   // free RAM in MiB at dialog-open time
 
     public MountConfigDialog()
     {
@@ -20,6 +21,19 @@ public sealed partial class MountConfigDialog : UserControl
     public void Initialize(Window window, ProviderOptions? existing = null)
     {
         _window = window;
+
+        // Compute free RAM (in MiB) for the memory size slider ceiling.
+        var gcInfo = GC.GetGCMemoryInfo();
+        _maxMemoryMb = gcInfo.TotalAvailableMemoryBytes > 0
+            ? Math.Max(64, (long)(gcInfo.TotalAvailableMemoryBytes / (1024 * 1024)))
+            : 4096;
+
+        MemorySizeSlider.Maximum = _maxMemoryMb;
+        long defaultMb = existing?.MemorySizeLimitBytes is > 0
+            ? existing.MemorySizeLimitBytes.Value / (1024 * 1024)
+            : _maxMemoryMb;
+        MemorySizeSlider.Value = Math.Clamp(defaultMb, 64, _maxMemoryMb);
+        UpdateMemorySizeLabel();
 
         ProviderBox.SelectedItem = existing?.Provider ?? "memory";
         ProviderBox.IsEnabled = existing is null;
@@ -45,15 +59,20 @@ public sealed partial class MountConfigDialog : UserControl
         UpdateVisibility();
     }
 
-    public ProviderOptions GetOptions() =>
-        new()
+    public ProviderOptions GetOptions()
+    {
+        string provider = (ProviderBox.SelectedItem as string) ?? "memory";
+        long? memorySizeLimit = provider == "memory"
+            ? (long)MemorySizeSlider.Value * 1024 * 1024
+            : null;
+
+        return new()
         {
-            Provider = (ProviderBox.SelectedItem as string) ?? "memory",
+            Provider = provider,
             Backend = (BackendBox.SelectedItem as string) ?? "winfsp",
             Letter = NormalizeDriveLetter(LetterBox.SelectedItem as string) ?? string.Empty,
-            Label = string.IsNullOrWhiteSpace(LabelBox.Text)
-                ? NormalizeDriveLetter(LetterBox.SelectedItem as string)
-                : LabelBox.Text.Trim(),
+            Label = string.IsNullOrWhiteSpace(LabelBox.Text) ? null : LabelBox.Text.Trim(),
+            MemorySizeLimitBytes = memorySizeLimit,
             Path = string.IsNullOrWhiteSpace(PathBox.Text) ? null : PathBox.Text.Trim(),
             ArchiveFile = string.IsNullOrWhiteSpace(ArchiveBox.Text) ? null : ArchiveBox.Text.Trim(),
             ApiUrl = string.IsNullOrWhiteSpace(ApiUrlBox.Text) ? null : ApiUrlBox.Text.Trim(),
@@ -69,6 +88,7 @@ public sealed partial class MountConfigDialog : UserControl
             NfsExport = string.IsNullOrWhiteSpace(NfsExportBox.Text) ? null : NfsExportBox.Text.Trim(),
             NfsPath = string.IsNullOrWhiteSpace(NfsPathBox.Text) ? "/" : NfsPathBox.Text.Trim(),
         };
+    }
 
     private void ProviderBox_SelectionChanged(object sender, SelectionChangedEventArgs e) => UpdateVisibility();
 
@@ -101,10 +121,23 @@ public sealed partial class MountConfigDialog : UserControl
     private void UpdateVisibility()
     {
         string provider = (ProviderBox.SelectedItem as string) ?? "memory";
+        MemorySection.Visibility = provider == "memory" ? Visibility.Visible : Visibility.Collapsed;
         LocalArchiveSection.Visibility = provider is "local" or "archive" ? Visibility.Visible : Visibility.Collapsed;
         KuboSection.Visibility = provider.StartsWith("kubo-", StringComparison.OrdinalIgnoreCase) ? Visibility.Visible : Visibility.Collapsed;
         S3Section.Visibility = provider == "s3" ? Visibility.Visible : Visibility.Collapsed;
         NfsSection.Visibility = provider == "nfs" ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private void MemorySizeSlider_ValueChanged(object sender, Microsoft.UI.Xaml.Controls.Primitives.RangeBaseValueChangedEventArgs e)
+        => UpdateMemorySizeLabel();
+
+    private void UpdateMemorySizeLabel()
+    {
+        if (MemorySizeLabel is null) return;
+        long mb = (long)MemorySizeSlider.Value;
+        MemorySizeLabel.Text = mb >= 1024
+            ? $"{mb / 1024.0:F1} GB / {_maxMemoryMb / 1024.0:F1} GB available"
+            : $"{mb} MB / {_maxMemoryMb} MB available";
     }
 
     private void RefreshDriveLetterChoices(string? preferredLetter = null)

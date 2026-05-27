@@ -55,7 +55,7 @@ public partial class App : Application
         _window.AppWindow.Closing += OnWindowClosing;
         _window.Activate();
 
-        AppTrayService.Initialize(ShowWindow, ExitApp);
+        AppTrayService.Initialize(ShowWindow, ShowSettings, ExitApp);
         AppTrayService.Start();
         _ = RestoreConfiguredMountsAsync();
     }
@@ -84,7 +84,25 @@ public partial class App : Application
         {
             _window.AppWindow.Show();
             _window.Activate();
+            BringToForeground(_window);
         });
+    }
+
+    private void ShowSettings()
+    {
+        _window?.DispatcherQueue.TryEnqueue(() =>
+        {
+            _window.AppWindow.Show();
+            _window.Activate();
+            BringToForeground(_window);
+            Services.GetRequiredService<INavigationService>().ShowSettingsPage();
+        });
+    }
+
+    private static void BringToForeground(MainWindow window)
+    {
+        var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(window);
+        NativeMethods.SetForegroundWindow(hwnd);
     }
 
     private async Task RestoreConfiguredMountsAsync()

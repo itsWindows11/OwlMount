@@ -8,19 +8,61 @@
     mc:Ignorable="d">
 
     <Page.Resources>
+        <local:BoolToStatusColorConverter x:Key="BoolToStatusColorConverter" />
+        <local:BoolToStatusTextConverter x:Key="BoolToStatusTextConverter" />
         <DataTemplate x:Key="MountItemTemplate" x:DataType="local:MountEntry">
             <Border
                 x:Name="CardRoot"
                 Padding="16,12"
+                AutomationProperties.Name="{x:Bind Label}"
                 Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
                 BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
                 BorderThickness="1"
-                CornerRadius="8">
+                CornerRadius="8"
+                RightTapped="MountCard_RightTapped">
                 <Border.Transitions>
                     <TransitionCollection>
                         <EntranceThemeTransition FromVerticalOffset="12" IsStaggeringEnabled="False" />
                     </TransitionCollection>
                 </Border.Transitions>
+                <FlyoutBase.AttachedFlyout>
+                    <MenuFlyout>
+                        <MenuFlyoutItem
+                            x:Name="EditFlyoutItem"
+                            Click="EditFlyoutItem_Click"
+                            Text="Edit">
+                            <MenuFlyoutItem.Icon>
+                                <SymbolIcon Symbol="Edit" />
+                            </MenuFlyoutItem.Icon>
+                        </MenuFlyoutItem>
+                        <MenuFlyoutItem Click="BrowseFlyoutItem_Click" Text="Browse">
+                            <MenuFlyoutItem.Icon>
+                                <SymbolIcon Symbol="OpenLocal" />
+                            </MenuFlyoutItem.Icon>
+                        </MenuFlyoutItem>
+                        <MenuFlyoutItem Click="EnableFlyoutItem_Click" Text="Enable">
+                            <MenuFlyoutItem.Icon>
+                                <FontIcon Glyph="&#xE768;" />
+                            </MenuFlyoutItem.Icon>
+                        </MenuFlyoutItem>
+                        <MenuFlyoutItem Click="DisableFlyoutItem_Click" Text="Disable">
+                            <MenuFlyoutItem.Icon>
+                                <FontIcon Glyph="&#xE8D8;" />
+                            </MenuFlyoutItem.Icon>
+                        </MenuFlyoutItem>
+                        <MenuFlyoutItem Click="UnmountFlyoutItem_Click" Text="Unmount">
+                            <MenuFlyoutItem.Icon>
+                                <SymbolIcon Symbol="Delete" />
+                            </MenuFlyoutItem.Icon>
+                        </MenuFlyoutItem>
+                        <MenuFlyoutSeparator />
+                        <MenuFlyoutItem Click="PropertiesFlyoutItem_Click" Text="Properties">
+                            <MenuFlyoutItem.Icon>
+                                <FontIcon Glyph="&#xE946;" />
+                            </MenuFlyoutItem.Icon>
+                        </MenuFlyoutItem>
+                    </MenuFlyout>
+                </FlyoutBase.AttachedFlyout>
                 <Grid ColumnSpacing="12">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="Auto" />
@@ -34,6 +76,7 @@
                         Grid.Column="0"
                         MinWidth="0"
                         VerticalAlignment="Center"
+                        AutomationProperties.Name="Select mount"
                         IsChecked="{x:Bind IsSelected, Mode=TwoWay}" />
                     <StackPanel
                         Grid.Column="1"
@@ -43,18 +86,30 @@
                         <SymbolIcon Symbol="SaveLocal" />
                         <TextBlock FontWeight="SemiBold" Text="{x:Bind DriveLetter}" />
                     </StackPanel>
-                    <TextBlock
+                    <Border
                         Grid.Column="2"
+                        Padding="6,2"
+                        VerticalAlignment="Center"
+                        Background="{x:Bind IsEnabled, Converter={StaticResource BoolToStatusColorConverter}}"
+                        CornerRadius="4">
+                        <StackPanel Orientation="Horizontal" Spacing="4">
+                            <Ellipse
+                                Width="6"
+                                Height="6"
+                                Fill="White" />
+                            <TextBlock
+                                FontSize="11"
+                                FontWeight="SemiBold"
+                                Foreground="White"
+                                Text="{x:Bind IsEnabled, Converter={StaticResource BoolToStatusTextConverter}}" />
+                        </StackPanel>
+                    </Border>
+                    <TextBlock
+                        Grid.Column="3"
+                        MinWidth="120"
                         VerticalAlignment="Center"
                         FontWeight="SemiBold"
                         Text="{x:Bind Label}"
-                        TextTrimming="CharacterEllipsis"
-                        TextWrapping="NoWrap" />
-                    <TextBlock
-                        Grid.Column="3"
-                        VerticalAlignment="Center"
-                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                        Text="{x:Bind ProviderDisplay}"
                         TextTrimming="CharacterEllipsis"
                         TextWrapping="NoWrap" />
                     <TextBlock
@@ -66,7 +121,7 @@
                         Grid.Column="5"
                         VerticalAlignment="Center"
                         Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                        Text="{x:Bind State}" />
+                        Text="{x:Bind ProviderDisplay}" />
                 </Grid>
                 <VisualStateManager.VisualStateGroups>
                     <VisualStateGroup x:Name="HoverStates">
@@ -92,12 +147,13 @@
             x:Name="MountsListView"
             MinHeight="120"
             HorizontalContentAlignment="Stretch"
+            AutomationProperties.Name="Active mounts"
             ItemTemplate="{StaticResource MountItemTemplate}"
             ItemsSource="{x:Bind ViewModel.Mounts}"
             SelectionMode="None">
 
             <ListView.Header>
-                <StackPanel>
+                <StackPanel Margin="0,0,0,12">
                     <Grid ColumnSpacing="12">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*" />
@@ -112,15 +168,10 @@
                         <Button
                             Grid.Column="1"
                             VerticalAlignment="Top"
+                            AutomationProperties.Name="Add mount"
                             Command="{x:Bind ViewModel.AddMountCommand}"
                             Content="Add mount" />
                     </Grid>
-
-                    <TextBlock
-                        Margin="0,12,0,8"
-                        FontSize="18"
-                        FontWeight="SemiBold"
-                        Text="Active mounts" />
                 </StackPanel>
             </ListView.Header>
 

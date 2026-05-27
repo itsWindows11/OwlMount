@@ -11,6 +11,12 @@ public sealed class ProviderOptions
     public string? Label { get; init; }
     public bool ForceReadOnly { get; init; }
 
+    /// <summary>
+    /// Optional size limit in bytes for the memory provider.
+    /// When null, defaults to the machine's total available physical memory.
+    /// </summary>
+    public long? MemorySizeLimitBytes { get; init; }
+
     // local / archive
     public string? Path { get; init; }
     public string? ArchiveFile { get; init; }

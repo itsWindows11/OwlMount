@@ -17,6 +17,7 @@ public sealed class WinFspBackend : IOwlMountBackend
 {
     private readonly OwlMountFileSystem _fs;
     private FileSystemHost? _host;
+    private readonly string? _volumeLabel;
 
     /// <inheritdoc/>
     public string Name => "WinFsp";
@@ -34,15 +35,18 @@ public sealed class WinFspBackend : IOwlMountBackend
         SizeProviderRegistry? sizeProviders = null,
         bool readOnly = false,
         ulong? totalSize = null,
-        ulong? freeSize = null)
+        ulong? freeSize = null,
+        string? volumeLabel = null)
     {
         IsReadOnly = readOnly;
+        _volumeLabel = volumeLabel;
 
         _fs = new OwlMountFileSystem(
             root, blockCache, rangeReaders, sizeProviders,
             readOnly:            IsReadOnly,
             totalSize:           totalSize,
             freeSize:            freeSize,
+            volumeLabel:         volumeLabel,
             onDispatcherStopped: OnDispatcherStopped);
     }
 

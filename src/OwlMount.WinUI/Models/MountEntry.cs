@@ -10,9 +10,10 @@ public partial class MountEntry : ObservableObject
     public string ProviderDisplay { get; init; }
     public string State { get; init; }
     public string Capacity { get; init; }
+    public bool IsEnabled { get; init; }
     [ObservableProperty] public partial bool IsSelected { get; set; }
 
-    public MountEntry(string driveLetter, string label, string provider, string providerDisplay, string state, string capacity)
+    public MountEntry(string driveLetter, string label, string provider, string providerDisplay, string state, string capacity, bool isEnabled = true)
     {
         DriveLetter = driveLetter;
         Label = label;
@@ -20,5 +21,6 @@ public partial class MountEntry : ObservableObject
         ProviderDisplay = providerDisplay;
         State = state;
         Capacity = capacity;
+        IsEnabled = isEnabled;
     }
 }

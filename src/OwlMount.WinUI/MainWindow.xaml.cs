@@ -1,11 +1,14 @@
 using Microsoft.UI.Composition.SystemBackdrops;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.UI.Input;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Animation;
 using OwlMount.WinUI.Services;
 using OwlMount.WinUI.Views;
 using Microsoft.UI.Windowing;
+using Windows.Graphics;
 
 namespace OwlMount.WinUI;
 
@@ -32,14 +35,90 @@ public sealed partial class MainWindow : Window
         AppWindow.TitleBar.PreferredHeightOption = TitleBarHeightOption.Tall;
         if (AppWindow.Presenter is OverlappedPresenter presenter)
         {
-            presenter.PreferredMinimumWidth = 980;
-            presenter.PreferredMinimumHeight = 720;
+            presenter.PreferredMinimumWidth = 700;
+            presenter.PreferredMinimumHeight = 500;
         }
         Navigation.BackButtonVisibilityChanged += Navigation_BackButtonVisibilityChanged;
         Navigation.Attach(ContentFrame);
         Navigation.ShowHomePage();
 
+        AppTitleBar.Loaded += AppTitleBar_Loaded;
         Activated += OnFirstActivated;
+    }
+
+    private void AppTitleBar_Loaded(object sender, RoutedEventArgs e)
+    {
+        UpdateTitleBarDragRects();
+        AppTitleBar.SizeChanged += (_, _) => UpdateTitleBarDragRects();
+        SettingsButton.SizeChanged += (_, _) => UpdateTitleBarDragRects();
+
+        // Update drag rects when back button visibility changes
+        AppTitleBar.RegisterPropertyChangedCallback(
+            CommunityToolkit.WinUI.Controls.TitleBar.IsBackButtonVisibleProperty,
+            (_, _) => UpdateTitleBarDragRects());
+    }
+
+    private void UpdateTitleBarDragRects()
+    {
+        if (!AppTitleBar.IsLoaded) return;
+
+        double scale = AppTitleBar.XamlRoot?.RasterizationScale ?? 1.0;
+        double titleBarHeight = AppTitleBar.ActualHeight;
+
+        // Full title bar = caption (draggable).
+        var captionRect = new RectInt32(
+            0, 0,
+            (int)(AppTitleBar.ActualWidth * scale),
+            (int)(titleBarHeight * scale));
+
+        // Collect passthrough rects for every interactive element in the title bar.
+        var passthroughRects = new System.Collections.Generic.List<RectInt32>();
+        foreach (var element in GetTitleBarInteractiveElements())
+        {
+            var bounds = element.TransformToVisual(AppTitleBar)
+                                .TransformBounds(new Windows.Foundation.Rect(0, 0,
+                                    element.ActualWidth, element.ActualHeight));
+            if (bounds.Width <= 0 || bounds.Height <= 0) continue;
+            passthroughRects.Add(new RectInt32(
+                (int)(bounds.X      * scale),
+                (int)(bounds.Y      * scale),
+                (int)(bounds.Width  * scale),
+                (int)(bounds.Height * scale)));
+        }
+
+        var nonClientSource = InputNonClientPointerSource.GetForWindowId(AppWindow.Id);
+        nonClientSource.SetRegionRects(NonClientRegionKind.Caption,     [captionRect]);
+        nonClientSource.SetRegionRects(NonClientRegionKind.Passthrough, [.. passthroughRects]);
+    }
+
+    /// <summary>
+    /// Returns every interactive element inside the TitleBar that should not trigger window drag:
+    /// the settings button (in the Footer) and the back button (found by name in the template).
+    /// </summary>
+    private IEnumerable<FrameworkElement> GetTitleBarInteractiveElements()
+    {
+        // Settings button is directly named in our XAML.
+        if (SettingsButton.Visibility == Visibility.Visible)
+            yield return SettingsButton;
+
+        // Back button is inside the CommunityToolkit TitleBar template — find it by its PART_ name.
+        if (AppTitleBar.IsBackButtonVisible &&
+            FindDescendantByName(AppTitleBar, "PART_BackButton") is FrameworkElement backBtn)
+            yield return backBtn;
+    }
+
+    private static FrameworkElement? FindDescendantByName(DependencyObject parent, string name)
+    {
+        int count = VisualTreeHelper.GetChildrenCount(parent);
+        for (int i = 0; i < count; i++)
+        {
+            var child = VisualTreeHelper.GetChild(parent, i);
+            if (child is FrameworkElement fe && fe.Name == name)
+                return fe;
+            var result = FindDescendantByName(child, name);
+            if (result is not null) return result;
+        }
+        return null;
     }
 
     private bool _overlaySetup;
@@ -121,5 +200,8 @@ public sealed partial class MainWindow : Window
     {
         AppTitleBar.IsBackButtonVisible = canGoBack;
         SettingsButton.Visibility = Navigation.IsShowingSettingsPage() ? Visibility.Collapsed : Visibility.Visible;
+        // Force layout update before recalculating drag rects
+        SettingsButton.UpdateLayout();
+        UpdateTitleBarDragRects();
     }
 }

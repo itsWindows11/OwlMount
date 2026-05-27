@@ -156,6 +156,20 @@ public sealed partial class ProjFsBackend : IOwlMountBackend
             return false;
         }
 
+        // Set the volume label
+        if (!string.IsNullOrWhiteSpace(volumeLabel))
+        {
+            try
+            {
+                string rootPath = mountPoint.EndsWith("\\") ? mountPoint : mountPoint + "\\";
+                SetVolumeLabel(rootPath, volumeLabel);
+            }
+            catch
+            {
+                // Volume label setting is best-effort; don't fail the mount if it fails
+            }
+        }
+
         return true;
     }
 
@@ -213,6 +227,10 @@ public sealed partial class ProjFsBackend : IOwlMountBackend
     [return: MarshalAs(UnmanagedType.Bool)]
     private static partial bool DefineDosDevice(
         uint dwFlags, string lpDeviceName, string? lpTargetPath);
+
+    [LibraryImport("kernel32", EntryPoint = "SetVolumeLabelW", SetLastError = true, StringMarshalling = StringMarshalling.Utf16)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool SetVolumeLabel(string lpRootPathName, string lpVolumeName);
 
     private const uint DDD_REMOVE_DEFINITION = 0x00000002u;
 }

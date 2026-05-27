@@ -14,26 +14,51 @@
                 Header="Basics"
                 IsExpanded="True">
                 <controls:SettingsExpander.Items>
-                    <controls:SettingsCard Header="Provider" IsClickEnabled="False">
+                    <controls:SettingsCard Header="Provider">
                         <ComboBox
                             x:Name="ProviderBox"
                             MinWidth="120"
                             SelectionChanged="ProviderBox_SelectionChanged" />
                     </controls:SettingsCard>
-                    <controls:SettingsCard Header="Backend" IsClickEnabled="False">
+                    <controls:SettingsCard Header="Backend">
                         <ComboBox x:Name="BackendBox" MinWidth="120" />
                     </controls:SettingsCard>
                     <controls:SettingsCard
                         Description="Auto-selects the first free drive letter."
-                        Header="Drive letter"
-                        IsClickEnabled="False">
+                        Header="Drive letter">
                         <ComboBox x:Name="LetterBox" MinWidth="120" />
                     </controls:SettingsCard>
-                    <controls:SettingsCard Header="Label" IsClickEnabled="False">
+                    <controls:SettingsCard Header="Label">
                         <TextBox
                             x:Name="LabelBox"
                             Width="280"
                             PlaceholderText="Optional, defaults to drive letter" />
+                    </controls:SettingsCard>
+                </controls:SettingsExpander.Items>
+            </controls:SettingsExpander>
+
+            <controls:SettingsExpander
+                x:Name="MemorySection"
+                Description="Configure the in-memory drive capacity."
+                Header="Memory"
+                IsExpanded="False"
+                Visibility="Collapsed">
+                <controls:SettingsExpander.Items>
+                    <controls:SettingsCard
+                        Description="Maximum amount of RAM the drive can use. Capped at currently available free memory."
+                        Header="Size limit">
+                        <StackPanel MinWidth="260" Spacing="8">
+                            <Slider
+                                x:Name="MemorySizeSlider"
+                                Minimum="64"
+                                StepFrequency="128"
+                                TickFrequency="64"
+                                ValueChanged="MemorySizeSlider_ValueChanged" />
+                            <TextBlock
+                                x:Name="MemorySizeLabel"
+                                HorizontalAlignment="Right"
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                        </StackPanel>
                     </controls:SettingsCard>
                 </controls:SettingsExpander.Items>
             </controls:SettingsExpander>
@@ -46,8 +71,7 @@
                 <controls:SettingsExpander.Items>
                     <controls:SettingsCard
                         Description="Used for the local provider."
-                        Header="Local path"
-                        IsClickEnabled="False">
+                        Header="Local path">
                         <Grid ColumnSpacing="8">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*" />
@@ -66,8 +90,7 @@
                     </controls:SettingsCard>
                     <controls:SettingsCard
                         Description="Choose the archive to mount read-only."
-                        Header="Archive file"
-                        IsClickEnabled="False">
+                        Header="Archive file">
                         <Grid ColumnSpacing="8">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*" />
@@ -93,19 +116,19 @@
                 Header="Kubo"
                 IsExpanded="False">
                 <controls:SettingsExpander.Items>
-                    <controls:SettingsCard Header="API URL" IsClickEnabled="False">
+                    <controls:SettingsCard Header="API URL">
                         <TextBox
                             x:Name="ApiUrlBox"
                             Width="360"
                             PlaceholderText="API URL" />
                     </controls:SettingsCard>
-                    <controls:SettingsCard Header="CID" IsClickEnabled="False">
+                    <controls:SettingsCard Header="CID">
                         <TextBox
                             x:Name="CidBox"
                             Width="360"
                             PlaceholderText="CID" />
                     </controls:SettingsCard>
-                    <controls:SettingsCard Header="IPNS" IsClickEnabled="False">
+                    <controls:SettingsCard Header="IPNS">
                         <TextBox
                             x:Name="IpnsBox"
                             Width="360"
@@ -120,34 +143,34 @@
                 Header="Amazon S3"
                 IsExpanded="False">
                 <controls:SettingsExpander.Items>
-                    <controls:SettingsCard Header="Bucket" IsClickEnabled="False">
+                    <controls:SettingsCard Header="Bucket">
                         <TextBox
                             x:Name="BucketBox"
                             Width="360"
                             PlaceholderText="Bucket" />
                     </controls:SettingsCard>
-                    <controls:SettingsCard Header="Prefix" IsClickEnabled="False">
+                    <controls:SettingsCard Header="Prefix">
                         <TextBox
                             x:Name="PrefixBox"
                             Width="360"
                             PlaceholderText="Prefix" />
                     </controls:SettingsCard>
-                    <controls:SettingsCard Header="Access key" IsClickEnabled="False">
+                    <controls:SettingsCard Header="Access key">
                         <TextBox
                             x:Name="AccessKeyBox"
                             Width="360"
                             PlaceholderText="Access key" />
                     </controls:SettingsCard>
-                    <controls:SettingsCard Header="Secret key" IsClickEnabled="False">
+                    <controls:SettingsCard Header="Secret key">
                         <PasswordBox x:Name="SecretKeyBox" Width="360" />
                     </controls:SettingsCard>
-                    <controls:SettingsCard Header="Region" IsClickEnabled="False">
+                    <controls:SettingsCard Header="Region">
                         <TextBox
                             x:Name="RegionBox"
                             Width="360"
                             PlaceholderText="Region" />
                     </controls:SettingsCard>
-                    <controls:SettingsCard Header="Endpoint" IsClickEnabled="False">
+                    <controls:SettingsCard Header="Endpoint">
                         <TextBox
                             x:Name="EndpointBox"
                             Width="360"
@@ -162,19 +185,19 @@
                 Header="NFS"
                 IsExpanded="False">
                 <controls:SettingsExpander.Items>
-                    <controls:SettingsCard Header="Host" IsClickEnabled="False">
+                    <controls:SettingsCard Header="Host">
                         <TextBox
                             x:Name="NfsHostBox"
                             Width="360"
                             PlaceholderText="Host" />
                     </controls:SettingsCard>
-                    <controls:SettingsCard Header="Export" IsClickEnabled="False">
+                    <controls:SettingsCard Header="Export">
                         <TextBox
                             x:Name="NfsExportBox"
                             Width="360"
                             PlaceholderText="Export" />
                     </controls:SettingsCard>
-                    <controls:SettingsCard Header="Path" IsClickEnabled="False">
+                    <controls:SettingsCard Header="Path">
                         <TextBox
                             x:Name="NfsPathBox"
                             Width="360"

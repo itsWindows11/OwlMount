@@ -19,6 +19,7 @@
             x:Name="AppTitleBar"
             Title="OwlMount"
             Grid.Row="0"
+            AutomationProperties.Name="OwlMount"
             BackButtonClick="AppTitleBar_BackButtonClick"
             DisplayMode="Tall"
             IsBackButtonVisible="False"
@@ -34,6 +35,7 @@
                         Width="28"
                         Height="28"
                         Padding="0"
+                        AutomationProperties.Name="Settings"
                         Background="Transparent"
                         BorderThickness="0"
                         Command="{x:Bind ViewModel.ShowSettingsCommand}"
@@ -65,6 +67,7 @@
             Padding="12,10"
             HorizontalAlignment="Stretch"
             VerticalAlignment="Bottom"
+            AutomationProperties.Name="Selection actions"
             Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
             BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
             BorderThickness="1"
@@ -95,10 +98,50 @@
                     Grid.Column="2"
                     Orientation="Horizontal"
                     Spacing="8">
-                    <Button Command="{x:Bind ViewModel.EditSelectedCommand}">
+                    <Button
+                        AutomationProperties.Name="Select all mounts"
+                        Command="{x:Bind ViewModel.SelectAllCommand}"
+                        ToolTipService.ToolTip="{x:Bind ViewModel.SelectAllButtonText, Mode=OneWay}"
+                        Visibility="{x:Bind ViewModel.SelectAllVisibility, Mode=OneWay}">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <FontIcon FontSize="14" Glyph="&#xE762;" />
+                            <TextBlock Text="{x:Bind ViewModel.SelectAllButtonText, Mode=OneWay}" />
+                        </StackPanel>
+                    </Button>
+                    <Button
+                        AutomationProperties.Name="Browse selected mounts"
+                        Command="{x:Bind ViewModel.BrowseSelectedCommand}"
+                        ToolTipService.ToolTip="Browse in Explorer"
+                        Visibility="{x:Bind ViewModel.BrowseButtonVisibility, Mode=OneWay}">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <SymbolIcon Symbol="OpenLocal" />
+                            <TextBlock Text="Browse" />
+                        </StackPanel>
+                    </Button>
+                    <Button Command="{x:Bind ViewModel.EditSelectedCommand}" Visibility="{x:Bind ViewModel.EditButtonVisibility, Mode=OneWay}">
                         <StackPanel Orientation="Horizontal" Spacing="6">
                             <SymbolIcon Symbol="Edit" />
                             <TextBlock Text="Edit" />
+                        </StackPanel>
+                    </Button>
+                    <Button
+                        AutomationProperties.Name="Enable selected mounts"
+                        Command="{x:Bind ViewModel.EnableSelectedCommand}"
+                        ToolTipService.ToolTip="Enable (mount from configuration)"
+                        Visibility="{x:Bind ViewModel.EnableButtonVisibility, Mode=OneWay}">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <FontIcon FontSize="14" Glyph="&#xE768;" />
+                            <TextBlock Text="Enable" />
+                        </StackPanel>
+                    </Button>
+                    <Button
+                        AutomationProperties.Name="Disable selected mounts"
+                        Command="{x:Bind ViewModel.DisableSelectedCommand}"
+                        ToolTipService.ToolTip="Disable (unmount, keep configuration)"
+                        Visibility="{x:Bind ViewModel.DisableButtonVisibility, Mode=OneWay}">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <FontIcon FontSize="14" Glyph="&#xE8D8;" />
+                            <TextBlock Text="Disable" />
                         </StackPanel>
                     </Button>
                     <Button Command="{x:Bind ViewModel.UnmountSelectedCommand}">

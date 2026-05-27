@@ -6,7 +6,7 @@ namespace OwlMount.WinUI.Services;
 
 public interface IAppTrayService
 {
-    void Initialize(Action showWindow, Action exitApp);
+    void Initialize(Action showWindow, Action showSettings, Action exitApp);
     void Start();
     void NotifyMountsChanged();
     void Dispose();
@@ -16,6 +16,7 @@ public sealed class AppTrayService : IAppTrayService
 {
     private readonly MountService _mountService;
     private Action? _showWindow;
+    private Action? _showSettings;
     private Action? _exitApp;
 
     private WinForms.Form? _trayPump;
@@ -26,9 +27,10 @@ public sealed class AppTrayService : IAppTrayService
         _mountService = mountService;
     }
 
-    public void Initialize(Action showWindow, Action exitApp)
+    public void Initialize(Action showWindow, Action showSettings, Action exitApp)
     {
         _showWindow = showWindow;
+        _showSettings = showSettings;
         _exitApp = exitApp;
     }
 
@@ -120,6 +122,11 @@ public sealed class AppTrayService : IAppTrayService
         };
         openItem.Click += (_, _) => _showWindow?.Invoke();
         menu.Items.Add(openItem);
+
+        var settingsItem = new WinForms.ToolStripMenuItem("Settings");
+        settingsItem.Click += (_, _) => _showSettings?.Invoke();
+        menu.Items.Add(settingsItem);
+
         menu.Items.Add(new WinForms.ToolStripSeparator());
 
         IReadOnlyList<ActiveMount> mounts = _mountService.ActiveMounts;

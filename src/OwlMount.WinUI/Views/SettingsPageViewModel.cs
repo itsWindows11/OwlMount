@@ -21,6 +21,9 @@ public partial class SettingsPageViewModel : ObservableObject
     private ElementTheme _selectedTheme;
 
     public IAsyncRelayCommand BrowseExportPathCommand { get; }
+    public IAsyncRelayCommand ClearDiskCacheCommand { get; }
+    public IAsyncRelayCommand ClearProjFsResidueCommand { get; }
+    public IAsyncRelayCommand ClearAllCacheCommand { get; }
 
     public IReadOnlyList<ElementTheme> ThemeOptions { get; } = [ElementTheme.Default, ElementTheme.Light, ElementTheme.Dark];
 
@@ -85,8 +88,11 @@ public partial class SettingsPageViewModel : ObservableObject
     }
 
     public Uri ProjectUrl { get; } = new("https://github.com/itsWindows11/OwlMount");
-    public string CopyrightText { get; } = "Copyright (c) 2026 itsWindows11 & OwlMount contributors";
-    public string AboutDescription { get; } = $"OwlMount {typeof(App).Assembly.GetName().Version} - Copyright (c) 2026 itsWindows11 & OwlMount contributors";
+    public string AppVersion { get; } = $"OwlMount {typeof(App).Assembly.GetName().Version}";
+    public string CopyrightText { get; } = "Copyright \u00a9 2026 itsWindows11 & OwlMount contributors";
+
+    [ObservableProperty] public partial string ClearCacheStatusText { get; set; } = string.Empty;
+    [ObservableProperty] public partial string ClearProjFsStatusText { get; set; } = string.Empty;
 
     public SettingsPageViewModel(MountService mountService, AppSettingsService settingsService, LocalLogService log)
     {
@@ -94,6 +100,9 @@ public partial class SettingsPageViewModel : ObservableObject
         _settingsService = settingsService;
         _log = log;
         BrowseExportPathCommand = new AsyncRelayCommand(BrowseExportPathAsync);
+        ClearDiskCacheCommand = new AsyncRelayCommand(ClearDiskCacheAsync);
+        ClearProjFsResidueCommand = new AsyncRelayCommand(ClearProjFsResidueAsync);
+        ClearAllCacheCommand = new AsyncRelayCommand(ClearAllCacheAsync);
 
         _selectedTheme = _settingsService.Theme;
         _saveMountConfigurations = _mountService.SaveMountPointConfigurations;
@@ -103,6 +112,52 @@ public partial class SettingsPageViewModel : ObservableObject
     }
 
     public void SetWindowProvider(Func<Window?> windowProvider) => _windowProvider = windowProvider;
+
+    private async Task ClearDiskCacheAsync()
+    {
+        ClearCacheStatusText = "Clearing…";
+        long freed = await _mountService.ClearDiskCacheAsync();
+        ClearCacheStatusText = freed > 0
+            ? $"Cleared {FormatBytes(freed)}."
+            : "Nothing to clear.";
+        _ = _log.InfoAsync($"Disk cache cleared: {freed} bytes freed.");
+    }
+
+    private async Task ClearProjFsResidueAsync()
+    {
+        ClearProjFsStatusText = "Clearing…";
+        long freed = await _mountService.ClearProjFsResidueAsync();
+        ClearProjFsStatusText = freed > 0
+            ? $"Cleared {FormatBytes(freed)}."
+            : "Nothing to clear.";
+        _ = _log.InfoAsync($"ProjFS residue cleared: {freed} bytes freed.");
+    }
+
+    private async Task ClearAllCacheAsync()
+    {
+        ClearCacheStatusText = "Clearing…";
+        ClearProjFsStatusText = "Clearing…";
+
+        var cacheData = await Task.WhenAll(
+            _mountService.ClearDiskCacheAsync(),
+            _mountService.ClearProjFsResidueAsync()
+        );
+
+        long cacheFreed = cacheData[0];
+        long residueFreed = cacheData[1];
+
+        ClearCacheStatusText = cacheFreed > 0 ? $"Cleared {FormatBytes(cacheFreed)}." : "Nothing to clear.";
+        ClearProjFsStatusText = residueFreed > 0 ? $"Cleared {FormatBytes(residueFreed)}." : "Nothing to clear.";
+        _ = _log.InfoAsync($"Clear all: cache {cacheFreed} B, residue {residueFreed} B.");
+    }
+
+    private static string FormatBytes(long bytes) => bytes switch
+    {
+        >= 1024 * 1024 * 1024 => $"{bytes / (1024.0 * 1024 * 1024):F1} GB",
+        >= 1024 * 1024        => $"{bytes / (1024.0 * 1024):F1} MB",
+        >= 1024               => $"{bytes / 1024.0:F1} KB",
+        _                     => $"{bytes} B",
+    };
 
     private async Task BrowseExportPathAsync()
     {

@@ -56,7 +56,7 @@ internal static class ProviderFactory
             // ── memory ─────────────────────────────────────────────────────────
             case "memory":
                 root = new MemoryFolder(id: "memory-root", name: "memory-root");
-                (totalSize, freeSize) = GetMemoryVolumeSpace();
+                (totalSize, freeSize) = GetMemoryVolumeSpace(opts.MemorySizeLimitBytes);
                 break;
 
             // ── archive ────────────────────────────────────────────────────────
@@ -190,13 +190,16 @@ internal static class ProviderFactory
 
     // ── Volume size helpers ──────────────────────────────────────────────────
 
-    private static (ulong? TotalSize, ulong? FreeSize) GetMemoryVolumeSpace()
+    private static (ulong? TotalSize, ulong? FreeSize) GetMemoryVolumeSpace(long? limitBytes = null)
     {
         var gcInfo = GC.GetGCMemoryInfo();
         if (gcInfo.TotalAvailableMemoryBytes <= 0)
             return (null, null);
 
-        ulong total = (ulong)gcInfo.TotalAvailableMemoryBytes;
+        ulong physicalTotal = (ulong)gcInfo.TotalAvailableMemoryBytes;
+        ulong total = limitBytes.HasValue && limitBytes.Value > 0
+            ? (ulong)Math.Min(limitBytes.Value, (long)physicalTotal)
+            : physicalTotal;
         ulong used = (ulong)Math.Max(GC.GetTotalMemory(forceFullCollection: false), 0L);
         ulong free = used >= total ? 0 : total - used;
         return (total, free);

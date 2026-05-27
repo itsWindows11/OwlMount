@@ -25,15 +25,16 @@
                 FontWeight="SemiBold"
                 Text="Settings" />
 
-            <!-- Hide the settings button when on the settings page by setting TitleBar footer visibility from code-behind -->
+            <TextBlock
+                Margin="0,12,0,4"
+                FontWeight="SemiBold"
+                Text="General" />
 
-            <controls:SettingsCard
-                Margin="0,12,0,0"
-                Header="Theme"
-                IsClickEnabled="False">
+            <controls:SettingsCard Header="Theme">
                 <ComboBox
                     Width="180"
                     HorizontalAlignment="Right"
+                    AutomationProperties.Name="Theme"
                     ItemsSource="{x:Bind ViewModel.ThemeOptions, Mode=OneWay}"
                     SelectedItem="{x:Bind ViewModel.SelectedTheme, Mode=TwoWay}">
                     <ComboBox.ItemTemplate>
@@ -44,8 +45,11 @@
                 </ComboBox>
             </controls:SettingsCard>
 
-            <controls:SettingsCard Header="Mount configuration persistence" IsClickEnabled="False">
-                <ToggleSwitch HorizontalAlignment="Right" IsOn="{x:Bind ViewModel.SaveMountConfigurations, Mode=TwoWay}" />
+            <controls:SettingsCard Header="Mount configuration persistence">
+                <ToggleSwitch
+                    HorizontalAlignment="Right"
+                    AutomationProperties.Name="Mount configuration persistence"
+                    IsOn="{x:Bind ViewModel.SaveMountConfigurations, Mode=TwoWay}" />
             </controls:SettingsCard>
 
             <controls:SettingsExpander
@@ -58,7 +62,7 @@
                     </TransitionCollection>
                 </controls:SettingsExpander.Transitions>
                 <controls:SettingsExpander.Items>
-                    <controls:SettingsCard Header="Export path" IsClickEnabled="False">
+                    <controls:SettingsCard Header="Export path">
                         <StackPanel Orientation="Horizontal" Spacing="12">
                             <TextBox
                                 x:Name="ExportPathBox"
@@ -70,6 +74,7 @@
 
                             <Button
                                 Grid.Column="1"
+                                AutomationProperties.Name="Browse export path"
                                 Command="{x:Bind ViewModel.BrowseExportPathCommand}"
                                 Content="Browse"
                                 IsEnabled="{x:Bind ViewModel.IsPersistMemoryFsPathEnabled, Mode=OneWay}" />
@@ -77,10 +82,65 @@
                     </controls:SettingsCard>
                 </controls:SettingsExpander.Items>
 
-                <ToggleSwitch IsOn="{x:Bind ViewModel.PersistMemoryFsOnExit, Mode=TwoWay}" />
+                <ToggleSwitch
+                    AutomationProperties.Name="In-memory filesystem export"
+                    IsOn="{x:Bind ViewModel.PersistMemoryFsOnExit, Mode=TwoWay}" />
             </controls:SettingsExpander>
 
-            <controls:SettingsCard Description="{x:Bind ViewModel.AboutDescription, Mode=OneWay}" Header="About">
+            <TextBlock
+                Margin="0,12,0,4"
+                FontWeight="SemiBold"
+                Text="Advanced" />
+
+            <controls:SettingsExpander
+                Description="Maintenance actions for cached and residual data."
+                Header="Cache &amp; residue"
+                IsExpanded="False">
+                <Button
+                    AutomationProperties.Name="Clear all cache and residue"
+                    Command="{x:Bind ViewModel.ClearAllCacheCommand}"
+                    Content="Clear all"
+                    ToolTipService.ToolTip="Clear disk cache and ProjFS residue" />
+                <controls:SettingsExpander.Items>
+                    <controls:SettingsCard
+                        Description="Removes cached block data downloaded by remote providers (S3, NFS, IPFS…). This does not affect active mounts."
+                        Header="Clear disk cache">
+                        <StackPanel Orientation="Horizontal" Spacing="12">
+                            <TextBlock
+                                VerticalAlignment="Center"
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                Text="{x:Bind ViewModel.ClearCacheStatusText, Mode=OneWay}" />
+                            <Button
+                                AutomationProperties.Name="Clear disk cache"
+                                Command="{x:Bind ViewModel.ClearDiskCacheCommand}"
+                                Content="Clear" />
+                        </StackPanel>
+                    </controls:SettingsCard>
+                    <controls:SettingsCard
+                        Description="Removes leftover ProjFS virtualisation-root directories from drives that are no longer mounted."
+                        Header="Clear ProjFS residue">
+                        <StackPanel Orientation="Horizontal" Spacing="12">
+                            <TextBlock
+                                VerticalAlignment="Center"
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                Text="{x:Bind ViewModel.ClearProjFsStatusText, Mode=OneWay}" />
+                            <Button
+                                AutomationProperties.Name="Clear ProjFS residue"
+                                Command="{x:Bind ViewModel.ClearProjFsResidueCommand}"
+                                Content="Clear" />
+                        </StackPanel>
+                    </controls:SettingsCard>
+                </controls:SettingsExpander.Items>
+            </controls:SettingsExpander>
+
+            <TextBlock
+                Margin="0,12,0,4"
+                FontWeight="SemiBold"
+                Text="About" />
+
+            <controls:SettingsCard
+                Description="{x:Bind ViewModel.CopyrightText}"
+                Header="{x:Bind ViewModel.AppVersion}">
                 <HyperlinkButton Content="Project website" NavigateUri="{x:Bind ViewModel.ProjectUrl}" />
             </controls:SettingsCard>
         </StackPanel>

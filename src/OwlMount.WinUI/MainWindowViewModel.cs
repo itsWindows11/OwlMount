@@ -15,6 +15,7 @@ public partial class MainWindowViewModel : ObservableObject
     private Func<Task<ProviderOptions?>> _addMountDialog = () => Task.FromResult<ProviderOptions?>(null);
     private Func<MountEntry, Task<ProviderOptions?>> _editMountDialog = _ => Task.FromResult<ProviderOptions?>(null);
     private Func<Task<bool>> _confirmUnmount = () => Task.FromResult(false);
+    private Func<Task<bool>> _confirmDisable = () => Task.FromResult(false);
     private Func<string?> _s3SecretProvider;
     private bool _isInitializing = true;
     private bool? _readOnlyBeforeArchive;
@@ -29,6 +30,10 @@ public partial class MainWindowViewModel : ObservableObject
     public IAsyncRelayCommand AddMountCommand { get; }
     public IAsyncRelayCommand EditSelectedCommand { get; }
     public IAsyncRelayCommand UnmountSelectedCommand { get; }
+    public IAsyncRelayCommand DisableSelectedCommand { get; }
+    public IAsyncRelayCommand EnableSelectedCommand { get; }
+    public IRelayCommand SelectAllCommand { get; }
+    public IRelayCommand BrowseSelectedCommand { get; }
     public IRelayCommand ShowSettingsCommand { get; }
     public IRelayCommand RefreshCommand { get; }
     public IRelayCommand ExitCommand { get; }
@@ -36,6 +41,13 @@ public partial class MainWindowViewModel : ObservableObject
     [ObservableProperty] public partial string StatusMessage { get; set; }
     [ObservableProperty] public partial Visibility SelectionActionsVisibility { get; set; } = Visibility.Collapsed;
     [ObservableProperty] public partial int SelectedMountCount { get; set; } = 0;
+
+    public Visibility EditButtonVisibility => SelectedMountCount == 1 ? Visibility.Visible : Visibility.Collapsed;
+    public Visibility SelectAllVisibility => (SelectedMountCount > 0 && SelectedMountCount < Mounts.Count) ? Visibility.Collapsed : Visibility.Visible;
+    public string SelectAllButtonText => SelectedMountCount == Mounts.Count ? "Unselect all" : "Select all";
+    [ObservableProperty] public partial Visibility EnableButtonVisibility { get; set; } = Visibility.Collapsed;
+    [ObservableProperty] public partial Visibility DisableButtonVisibility { get; set; } = Visibility.Collapsed;
+    [ObservableProperty] public partial Visibility BrowseButtonVisibility { get; set; } = Visibility.Collapsed;
     [ObservableProperty] public partial string SelectedProvider { get; set; }
     [ObservableProperty] public partial string SelectedBackend { get; set; }
     [ObservableProperty] public partial string DriveLetters { get; set; }
@@ -96,6 +108,10 @@ public partial class MainWindowViewModel : ObservableObject
         AddMountCommand = new AsyncRelayCommand(AddMountAsync);
         EditSelectedCommand = new AsyncRelayCommand(EditSelectedAsync);
         UnmountSelectedCommand = new AsyncRelayCommand(UnmountSelectedAsync);
+        DisableSelectedCommand = new AsyncRelayCommand(DisableSelectedAsync);
+        EnableSelectedCommand = new AsyncRelayCommand(EnableSelectedAsync);
+        SelectAllCommand = new RelayCommand(SelectAll);
+        BrowseSelectedCommand = new RelayCommand(BrowseSelected);
         ShowSettingsCommand = new RelayCommand(_navigation.ShowSettingsPage);
         RefreshCommand = new RelayCommand(RefreshMountsFromService);
         ExitCommand = new RelayCommand(_exitService.Exit);
@@ -108,14 +124,47 @@ public partial class MainWindowViewModel : ObservableObject
     public void RefreshMountsFromService()
     {
         Mounts.Clear();
+
+        // First add all active mounts
+        var activeLookup = new Dictionary<string, ActiveMount>(StringComparer.OrdinalIgnoreCase);
         foreach (ActiveMount m in _mountService.ActiveMounts)
         {
+            string letter = m.DriveLetter.TrimEnd(':').ToUpperInvariant();
+            activeLookup[letter] = m;
             string state = m.IsReadOnly ? "Running (R/O)" : "Running";
-            Mounts.Add(new MountEntry(m.DriveLetter, m.Label, m.Provider, GetProviderDisplayName(m.Provider), state, GetDriveCapacityText(m.DriveLetter)));
+            Mounts.Add(new MountEntry(
+                m.DriveLetter,
+                m.Label,
+                m.Provider,
+                GetProviderDisplayName(m.Provider),
+                state,
+                GetDriveCapacityText(m.DriveLetter),
+                isEnabled: true));
+        }
+
+        // Then add disabled configurations (those in config but not active)
+        foreach (ProviderOptions config in _mountService.MountConfigurations)
+        {
+            string letter = config.Letter.TrimEnd(':').ToUpperInvariant();
+            if (!activeLookup.ContainsKey(letter))
+            {
+                Mounts.Add(new MountEntry(
+                    config.Letter.EndsWith(':') ? config.Letter : config.Letter + ":",
+                    config.Label ?? string.Empty,
+                    config.Provider,
+                    GetProviderDisplayName(config.Provider),
+                    "Disabled",
+                    string.Empty,
+                    isEnabled: false));
+            }
         }
 
         if (Mounts.Count == 0)
             SetStatus("No active mounts.");
+
+        // Notify property changes for selection-dependent UI
+        OnPropertyChanged(nameof(SelectAllVisibility));
+        OnPropertyChanged(nameof(SelectAllButtonText));
     }
 
     public void SetStatus(string message) => StatusMessage = message;
@@ -128,6 +177,8 @@ public partial class MainWindowViewModel : ObservableObject
 
     public void SetConfirmUnmount(Func<Task<bool>> confirmation) => _confirmUnmount = confirmation;
 
+    public void SetConfirmDisable(Func<Task<bool>> confirmation) => _confirmDisable = confirmation;
+
     public void SetSelectedMounts(IEnumerable<MountEntry> selected)
     {
         SelectedMounts.Clear();
@@ -136,6 +187,41 @@ public partial class MainWindowViewModel : ObservableObject
 
         SelectedMountCount = SelectedMounts.Count;
         SelectionActionsVisibility = SelectedMounts.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+
+        // Check if selection is all enabled, all disabled, or mixed
+        bool allEnabled = SelectedMounts.Count > 0 && SelectedMounts.All(m => m.IsEnabled);
+        bool allDisabled = SelectedMounts.Count > 0 && SelectedMounts.All(m => !m.IsEnabled);
+        bool hasAnyDisabled = SelectedMounts.Any(m => !m.IsEnabled);
+
+        EnableButtonVisibility = allDisabled ? Visibility.Visible : Visibility.Collapsed;
+        DisableButtonVisibility = allEnabled ? Visibility.Visible : Visibility.Collapsed;
+        BrowseButtonVisibility = hasAnyDisabled ? Visibility.Collapsed : Visibility.Visible;
+
+        OnPropertyChanged(nameof(EditButtonVisibility));
+        OnPropertyChanged(nameof(SelectAllVisibility));
+        OnPropertyChanged(nameof(SelectAllButtonText));
+    }
+
+    private void SelectAll()
+    {
+        // Toggle: if all are selected, unselect all; otherwise select all
+        bool allSelected = SelectedMountCount == Mounts.Count;
+        foreach (MountEntry mount in Mounts)
+            mount.IsSelected = !allSelected;
+    }
+
+    private void BrowseSelected()
+    {
+        foreach (MountEntry mount in SelectedMounts)
+        {
+            // Skip disabled mounts
+            if (!mount.IsEnabled)
+                continue;
+
+            string letter = mount.DriveLetter.TrimEnd(':');
+            try { System.Diagnostics.Process.Start("explorer.exe", $"{letter}:\\"); }
+            catch { /* best-effort */ }
+        }
     }
 
     public void UnmountSelected(IReadOnlyList<MountEntry> selected)
@@ -154,6 +240,161 @@ public partial class MainWindowViewModel : ObservableObject
             ? $"Unmounted {selected[0].DriveLetter}."
             : $"Unmounted {selected.Count} drive(s).");
         _ = _log.InfoAsync($"Unmounted {selected.Count} mount(s).");
+    }
+
+    /// <summary>Disables the provided mounts (unmounts but keeps config).</summary>
+    public async Task DisableSelected(IReadOnlyList<MountEntry> selected)
+    {
+        if (selected.Count == 0)
+        {
+            SetStatus("Select one or more active mounts first.");
+            return;
+        }
+        
+        if (!await _confirmDisable())
+            return;
+
+        foreach (MountEntry mount in selected)
+            _mountService.Disable(mount.DriveLetter);
+
+        RefreshMountsFromService();
+        SetStatus(selected.Count == 1
+            ? $"Disabled {selected[0].DriveLetter}."
+            : $"Disabled {selected.Count} drive(s).");
+        _ = _log.InfoAsync($"Disabled {selected.Count} mount(s).");
+        SetSelectedMounts([]);
+    }
+
+    /// <summary>Opens the edit dialog for a specific mount entry (used by context menu).</summary>
+    public async Task EditMountAsync(MountEntry entry)
+    {
+        ProviderOptions? updated = await _editMountDialog(entry);
+        if (updated is null)
+            return;
+
+        if (!await _confirmUnmount())
+            return;
+
+        UnmountSelected([entry]);
+        _ = _log.InfoAsync($"Editing mount '{entry.DriveLetter}' via context menu.");
+        await MountFromOptionsAsync(updated);
+    }
+
+    /// <summary>Unmounts a single specific entry after confirmation (used by context menu).</summary>
+    public async Task UnmountSingleAsync(MountEntry entry)
+    {
+        if (!await _confirmUnmount())
+            return;
+
+        _ = _log.InfoAsync($"Unmounting '{entry.DriveLetter}' via context menu.");
+        UnmountSelected([entry]);
+        SetSelectedMounts([]);
+    }
+
+    /// <summary>Disables a single specific entry (unmounts but keeps config) via context menu.</summary>
+    public async Task DisableSingleAsync(MountEntry entry)
+    {
+        if (!await _confirmDisable())
+            return;
+
+        _ = _log.InfoAsync($"Disabling '{entry.DriveLetter}' via context menu.");
+        _mountService.Disable(entry.DriveLetter);
+        RefreshMountsFromService();
+        SetStatus($"Disabled {entry.DriveLetter}.");
+        SetSelectedMounts([]);
+    }
+
+    /// <summary>Enables (re-mounts) a single specific disabled entry via context menu.</summary>
+    public async Task EnableSingleAsync(MountEntry entry)
+    {
+        _ = _log.InfoAsync($"Enabling '{entry.DriveLetter}' via context menu.");
+
+        // Find the configuration for this drive
+        var config = _mountService.MountConfigurations
+            .FirstOrDefault(c => c.Letter.TrimEnd(':').Equals(entry.DriveLetter.TrimEnd(':'), StringComparison.OrdinalIgnoreCase));
+
+        if (config is null)
+        {
+            SetStatus($"No configuration found for {entry.DriveLetter}.");
+            return;
+        }
+
+        await MountFromOptionsAsync(config);
+        SetSelectedMounts([]);
+    }
+
+    private async Task DisableSelectedAsync()
+    {
+        if (SelectedMounts.Count == 0)
+        {
+            SetStatus("Select one or more active mounts first.");
+            return;
+        }
+
+        if (!await _confirmDisable())
+            return;
+
+        var selected = SelectedMounts.ToList();
+        foreach (MountEntry mount in selected)
+            _mountService.Disable(mount.DriveLetter);
+
+        RefreshMountsFromService();
+        SetStatus(selected.Count == 1
+            ? $"Disabled {selected[0].DriveLetter}."
+            : $"Disabled {selected.Count} drive(s).");
+        _ = _log.InfoAsync($"Disabled {selected.Count} mount(s).");
+        SetSelectedMounts([]);
+    }
+
+    private async Task EnableSelectedAsync()
+    {
+        if (SelectedMounts.Count == 0)
+        {
+            SetStatus("Select one or more disabled mounts first.");
+            return;
+        }
+
+        var selected = SelectedMounts.ToList();
+        int successCount = 0;
+        var failures = new List<string>();
+
+        foreach (MountEntry mount in selected)
+        {
+            var config = _mountService.MountConfigurations
+                .FirstOrDefault(c => c.Letter.TrimEnd(':').Equals(mount.DriveLetter.TrimEnd(':'), StringComparison.OrdinalIgnoreCase));
+
+            if (config is null)
+            {
+                failures.Add(mount.DriveLetter);
+                continue;
+            }
+
+            (bool success, string? error) = await _mountService.MountAsync(config);
+            if (success)
+                successCount++;
+            else
+                failures.Add($"{mount.DriveLetter}: {error}");
+        }
+
+        RefreshMountsFromService();
+
+        if (failures.Count == 0)
+        {
+            SetStatus(selected.Count == 1
+                ? $"Enabled {selected[0].DriveLetter}."
+                : $"Enabled {selected.Count} drive(s).");
+        }
+        else if (successCount == 0)
+        {
+            SetStatus($"Failed to enable drive(s): {string.Join(", ", failures)}");
+        }
+        else
+        {
+            SetStatus($"Enabled {successCount} drive(s). Failed: {string.Join(", ", failures)}");
+        }
+
+        _ = _log.InfoAsync($"Enabled {successCount}/{selected.Count} mount(s).");
+        SetSelectedMounts([]);
     }
 
     private async Task AddMountAsync()
@@ -256,6 +497,7 @@ public partial class MainWindowViewModel : ObservableObject
                 Letter = letter,
                 Label = NullIfBlank(opts.Label),
                 ForceReadOnly = opts.ForceReadOnly,
+                MemorySizeLimitBytes = opts.MemorySizeLimitBytes,
                 Path = NullIfBlank(opts.Path),
                 ArchiveFile = NullIfBlank(opts.ArchiveFile),
                 ApiUrl = NullIfBlank(opts.ApiUrl),

@@ -118,7 +118,7 @@ public sealed class MountService : IDisposable
             ? null
             : new BlockCache(providerId: $"{normalizedOpts.Provider}_{pr.Root.Id}");
 
-        string resolvedLabel = normalizedOpts.Label ?? DefaultLabel(normalizedOpts.Provider);
+        string resolvedLabel = normalizedOpts.Label ?? DefaultLabel(normalizedOpts.Provider, normalizedOpts.Letter);
 
         // ── Create backend ─────────────────────────────────────────────────────
         IOwlMountBackend backend;
@@ -141,7 +141,8 @@ public sealed class MountService : IDisposable
                     pr.Root, blockCache, rangeReaders, sizeProviders,
                     readOnly: isReadOnly,
                     totalSize: pr.TotalSize,
-                    freeSize: pr.FreeSize);
+                    freeSize: pr.FreeSize,
+                    volumeLabel: resolvedLabel);
             }
         }
         catch (Exception ex)
@@ -233,6 +234,30 @@ public sealed class MountService : IDisposable
         PersistConfigurationState();
     }
 
+    /// <summary>
+    /// Stops the active mount for the given drive letter but retains its saved
+    /// configuration so it can be re-mounted later.
+    /// </summary>
+    public void Disable(string letter)
+    {
+        letter = letter.TrimEnd(':').ToUpperInvariant();
+        ActiveMount? mount;
+        _stateSemaphore.Wait();
+        try
+        {
+            // Remove from active mounts but leave _mountConfigurations intact.
+            if (!_mounts.Remove(letter, out mount))
+                return;
+        }
+        finally
+        {
+            _stateSemaphore.Release();
+        }
+        StopMount(mount);
+        MountsChanged?.Invoke(this, EventArgs.Empty);
+        // No PersistConfigurationState call — configuration is intentionally kept.
+    }
+
     /// <summary>Stops and removes all active mounts.</summary>
     public void UnmountAll()
     {
@@ -260,6 +285,106 @@ public sealed class MountService : IDisposable
 
     /// <inheritdoc/>
     public void Dispose() => UnmountAll();
+
+    /// <summary>
+    /// Deletes all on-disk block-cache files written by <see cref="BlockCache"/>.
+    /// Returns the number of bytes freed.
+    /// </summary>
+    public Task<long> ClearDiskCacheAsync()
+    {
+        string cacheRoot = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "OwlMount", "Cache");
+        return Task.Run(() => DeleteDirectoryContents(cacheRoot));
+    }
+
+    /// <summary>
+    /// Deletes leftover ProjFS virtualisation-root directories that are not
+    /// associated with any currently-active mount.
+    /// Returns the number of bytes freed.
+    /// </summary>
+    public Task<long> ClearProjFsResidueAsync()
+    {
+        string virtRootBase = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "OwlMount", "VirtRoot");
+
+        HashSet<string> activeLetters;
+        _stateSemaphore.Wait();
+        try
+        {
+            activeLetters = new HashSet<string>(
+                _mounts.Keys.Select(k => k.ToUpperInvariant()),
+                StringComparer.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            _stateSemaphore.Release();
+        }
+
+        return Task.Run(() =>
+        {
+            long freed = 0;
+            if (!Directory.Exists(virtRootBase))
+                return freed;
+
+            foreach (string subDir in Directory.EnumerateDirectories(virtRootBase))
+            {
+                string letter = Path.GetFileName(subDir).ToUpperInvariant();
+                if (activeLetters.Contains(letter))
+                    continue; // don't touch live mounts
+
+                freed += GetDirectorySize(subDir);
+                ForceDeleteDirectory(subDir);
+            }
+
+            return freed;
+        });
+    }
+
+    private static long DeleteDirectoryContents(string path)
+    {
+        if (!Directory.Exists(path))
+            return 0;
+
+        long freed = GetDirectorySize(path);
+        ForceDeleteDirectory(path);
+        return freed;
+    }
+
+    private static long GetDirectorySize(string path)
+    {
+        if (!Directory.Exists(path))
+            return 0;
+
+        try
+        {
+            return new DirectoryInfo(path)
+                .EnumerateFiles("*", SearchOption.AllDirectories)
+                .Sum(f => { try { return f.Length; } catch { return 0L; } });
+        }
+        catch
+        {
+            return 0;
+        }
+    }
+
+    private static void ForceDeleteDirectory(string path)
+    {
+        if (!Directory.Exists(path))
+            return;
+
+        try
+        {
+            // Clear read-only / hidden attributes so Delete doesn't throw.
+            foreach (string file in Directory.EnumerateFiles(path, "*", SearchOption.AllDirectories))
+            {
+                try { File.SetAttributes(file, FileAttributes.Normal); } catch { /* best-effort */ }
+            }
+            Directory.Delete(path, recursive: true);
+        }
+        catch { /* best-effort */ }
+    }
 
     // ── Private helpers ────────────────────────────────────────────────────────
 
@@ -393,18 +518,18 @@ public sealed class MountService : IDisposable
         try { mount.ExtraDisposable?.Dispose(); } catch { /* best-effort */ }
     }
 
-    private static string DefaultLabel(string provider) =>
+    private static string DefaultLabel(string provider, string driveLetter) =>
         provider.ToUpperInvariant() switch
         {
-            "MEMORY"    => "OwlMount (Memory)",
-            "ARCHIVE"   => "OwlMount (Archive)",
-            "LOCAL"     => "OwlMount (Local)",
-            "KUBO-MFS"  => "OwlMount (MFS)",
-            "KUBO-IPFS" => "OwlMount (IPFS)",
-            "KUBO-IPNS" => "OwlMount (IPNS)",
-            "S3"        => "OwlMount (S3)",
-            "NFS"       => "OwlMount (NFS)",
-            _           => "OwlMount",
+            "MEMORY"    => $"OwlMount-Memory-{driveLetter}",
+            "ARCHIVE"   => $"OwlMount-Archive-{driveLetter}",
+            "LOCAL"     => $"OwlMount-Local-{driveLetter}",
+            "KUBO-MFS"  => $"OwlMount-MFS-{driveLetter}",
+            "KUBO-IPFS" => $"OwlMount-IPFS-{driveLetter}",
+            "KUBO-IPNS" => $"OwlMount-IPNS-{driveLetter}",
+            "S3"        => $"OwlMount-S3-{driveLetter}",
+            "NFS"       => $"OwlMount-NFS-{driveLetter}",
+            _           => $"OwlMount-{driveLetter}",
         };
 
     private static ProviderOptions NormalizeOptions(ProviderOptions opts)
@@ -422,6 +547,7 @@ public sealed class MountService : IDisposable
             Letter = letter,
             Label = opts.Label,
             ForceReadOnly = opts.ForceReadOnly,
+            MemorySizeLimitBytes = opts.MemorySizeLimitBytes,
             Path = opts.Path,
             ArchiveFile = opts.ArchiveFile,
             ApiUrl = opts.ApiUrl,
