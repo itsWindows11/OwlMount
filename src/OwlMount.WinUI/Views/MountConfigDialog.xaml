@@ -1,0 +1,243 @@
+<UserControl
+    x:Class="OwlMount.WinUI.Views.MountConfigDialog"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:controls="using:CommunityToolkit.WinUI.Controls"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d">
+
+    <ScrollViewer MinWidth="500" MaxHeight="420">
+        <StackPanel Spacing="12">
+            <controls:SettingsExpander
+                Description="Provider, backend, and drive letter."
+                Header="Basics"
+                IsExpanded="True">
+                <controls:SettingsExpander.Items>
+                    <controls:SettingsCard Header="Provider">
+                        <ComboBox
+                            x:Name="ProviderBox"
+                            MinWidth="120"
+                            SelectionChanged="ProviderBox_SelectionChanged" />
+                    </controls:SettingsCard>
+                    <controls:SettingsCard Header="Backend">
+                        <ComboBox x:Name="BackendBox" MinWidth="120" />
+                    </controls:SettingsCard>
+                    <controls:SettingsCard
+                        Description="Auto-selects the first free drive letter."
+                        Header="Drive letter">
+                        <ComboBox x:Name="LetterBox" MinWidth="120" />
+                    </controls:SettingsCard>
+                    <controls:SettingsCard Header="Label">
+                        <TextBox
+                            x:Name="LabelBox"
+                            Width="280"
+                            PlaceholderText="Optional, defaults to drive letter" />
+                    </controls:SettingsCard>
+                </controls:SettingsExpander.Items>
+            </controls:SettingsExpander>
+
+            <controls:SettingsExpander
+                x:Name="MemorySection"
+                Description="Configure the in-memory drive capacity."
+                Header="Memory"
+                IsExpanded="False"
+                Visibility="Collapsed">
+                <controls:SettingsExpander.Items>
+                    <controls:SettingsCard
+                        Description="Maximum amount of RAM the drive can use. Capped at currently available free memory."
+                        Header="Size limit">
+                        <StackPanel MinWidth="260" Spacing="8">
+                            <Slider
+                                x:Name="MemorySizeSlider"
+                                Minimum="64"
+                                StepFrequency="128"
+                                TickFrequency="64"
+                                ValueChanged="MemorySizeSlider_ValueChanged" />
+                            <TextBlock
+                                x:Name="MemorySizeLabel"
+                                HorizontalAlignment="Right"
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                        </StackPanel>
+                    </controls:SettingsCard>
+                </controls:SettingsExpander.Items>
+            </controls:SettingsExpander>
+
+            <controls:SettingsExpander
+                x:Name="LocalArchiveSection"
+                Description="Path-based mounts and archive files."
+                Header="Local and archive"
+                IsExpanded="False">
+                <controls:SettingsExpander.Items>
+                    <controls:SettingsCard
+                        Description="Used for the local provider."
+                        Header="Local path">
+                        <Grid ColumnSpacing="8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBox
+                                x:Name="PathBox"
+                                Grid.Column="0"
+                                IsReadOnly="True"
+                                PlaceholderText="Select a folder" />
+                            <Button
+                                Grid.Column="1"
+                                Click="BrowsePathButton_Click"
+                                Content="Browse" />
+                        </Grid>
+                    </controls:SettingsCard>
+                    <controls:SettingsCard
+                        Description="Choose the archive to mount read-only."
+                        Header="Archive file">
+                        <Grid ColumnSpacing="8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBox
+                                x:Name="ArchiveBox"
+                                Grid.Column="0"
+                                IsReadOnly="True"
+                                PlaceholderText="Select an archive file" />
+                            <Button
+                                Grid.Column="1"
+                                Click="BrowseArchiveButton_Click"
+                                Content="Browse" />
+                        </Grid>
+                    </controls:SettingsCard>
+                </controls:SettingsExpander.Items>
+            </controls:SettingsExpander>
+
+            <controls:SettingsExpander
+                x:Name="KuboSection"
+                Description="API and content-addressed mount options."
+                Header="Kubo"
+                IsExpanded="False">
+                <controls:SettingsExpander.Items>
+                    <controls:SettingsCard Header="API URL">
+                        <TextBox
+                            x:Name="ApiUrlBox"
+                            Width="360"
+                            PlaceholderText="API URL" />
+                    </controls:SettingsCard>
+                    <controls:SettingsCard Header="CID">
+                        <TextBox
+                            x:Name="CidBox"
+                            Width="360"
+                            PlaceholderText="CID" />
+                    </controls:SettingsCard>
+                    <controls:SettingsCard Header="IPNS">
+                        <TextBox
+                            x:Name="IpnsBox"
+                            Width="360"
+                            PlaceholderText="IPNS" />
+                    </controls:SettingsCard>
+                </controls:SettingsExpander.Items>
+            </controls:SettingsExpander>
+
+            <controls:SettingsExpander
+                x:Name="S3Section"
+                Description="Cloud bucket settings."
+                Header="Amazon S3"
+                IsExpanded="False">
+                <controls:SettingsExpander.Items>
+                    <controls:SettingsCard Header="Bucket">
+                        <TextBox
+                            x:Name="BucketBox"
+                            Width="360"
+                            PlaceholderText="Bucket" />
+                    </controls:SettingsCard>
+                    <controls:SettingsCard Header="Prefix">
+                        <TextBox
+                            x:Name="PrefixBox"
+                            Width="360"
+                            PlaceholderText="Prefix" />
+                    </controls:SettingsCard>
+                    <controls:SettingsCard Header="Access key">
+                        <TextBox
+                            x:Name="AccessKeyBox"
+                            Width="360"
+                            PlaceholderText="Access key" />
+                    </controls:SettingsCard>
+                    <controls:SettingsCard Header="Secret key">
+                        <PasswordBox x:Name="SecretKeyBox" Width="360" />
+                    </controls:SettingsCard>
+                    <controls:SettingsCard Header="Region">
+                        <TextBox
+                            x:Name="RegionBox"
+                            Width="360"
+                            PlaceholderText="Region" />
+                    </controls:SettingsCard>
+                    <controls:SettingsCard Header="Endpoint">
+                        <TextBox
+                            x:Name="EndpointBox"
+                            Width="360"
+                            PlaceholderText="Endpoint" />
+                    </controls:SettingsCard>
+                </controls:SettingsExpander.Items>
+            </controls:SettingsExpander>
+
+            <controls:SettingsExpander
+                x:Name="NfsSection"
+                Description="Network file system settings."
+                Header="NFS"
+                IsExpanded="False">
+                <controls:SettingsExpander.Items>
+                    <controls:SettingsCard Header="Host">
+                        <TextBox
+                            x:Name="NfsHostBox"
+                            Width="360"
+                            PlaceholderText="Host" />
+                    </controls:SettingsCard>
+                    <controls:SettingsCard Header="Export">
+                        <TextBox
+                            x:Name="NfsExportBox"
+                            Width="360"
+                            PlaceholderText="Export" />
+                    </controls:SettingsCard>
+                    <controls:SettingsCard Header="Path">
+                        <TextBox
+                            x:Name="NfsPathBox"
+                            Width="360"
+                            PlaceholderText="/path" />
+                    </controls:SettingsCard>
+                </controls:SettingsExpander.Items>
+            </controls:SettingsExpander>
+
+            <controls:SettingsExpander
+                x:Name="BlockCacheSection"
+                Description="Configure block cache for this mount (leave empty to use global settings)."
+                Header="Block cache"
+                IsExpanded="False">
+                <controls:SettingsExpander.Items>
+                    <controls:SettingsCard Header="Enable block cache">
+                        <ComboBox
+                            x:Name="EnableBlockCacheBox"
+                            MinWidth="120">
+                            <ComboBoxItem>Use global setting</ComboBoxItem>
+                            <ComboBoxItem>Enabled</ComboBoxItem>
+                            <ComboBoxItem>Disabled</ComboBoxItem>
+                        </ComboBox>
+                    </controls:SettingsCard>
+                    <controls:SettingsCard
+                        Description="Leave empty to use global setting."
+                        Header="Block cache size">
+                        <ComboBox
+                            x:Name="BlockCacheSizeBox"
+                            MinWidth="120">
+                            <ComboBoxItem>Use global setting</ComboBoxItem>
+                            <ComboBoxItem Tag="65536">64 KiB</ComboBoxItem>
+                            <ComboBoxItem Tag="131072">128 KiB</ComboBoxItem>
+                            <ComboBoxItem Tag="262144">256 KiB</ComboBoxItem>
+                            <ComboBoxItem Tag="524288">512 KiB</ComboBoxItem>
+                            <ComboBoxItem Tag="1048576">1 MiB</ComboBoxItem>
+                            <ComboBoxItem Tag="2097152">2 MiB</ComboBoxItem>
+                        </ComboBox>
+                    </controls:SettingsCard>
+                </controls:SettingsExpander.Items>
+            </controls:SettingsExpander>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

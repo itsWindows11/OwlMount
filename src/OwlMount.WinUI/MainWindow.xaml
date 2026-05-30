@@ -1,0 +1,157 @@
+<Window
+    x:Class="OwlMount.WinUI.MainWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:animatedvisuals="using:Microsoft.UI.Xaml.Controls.AnimatedVisuals"
+    xmlns:controls="using:CommunityToolkit.WinUI.Controls"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    Title="OwlMount"
+    mc:Ignorable="d">
+
+    <Grid x:Name="RootGrid">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <controls:TitleBar
+            x:Name="AppTitleBar"
+            Title="OwlMount"
+            Grid.Row="0"
+            AutomationProperties.Name="OwlMount"
+            BackButtonClick="AppTitleBar_BackButtonClick"
+            DisplayMode="Tall"
+            IsBackButtonVisible="False"
+            IsPaneButtonVisible="False">
+            <controls:TitleBar.Footer>
+                <StackPanel
+                    Padding="0,0,148,0"
+                    HorizontalAlignment="Right"
+                    Orientation="Horizontal"
+                    Spacing="4">
+                    <Button
+                        x:Name="SettingsButton"
+                        Width="28"
+                        Height="28"
+                        Padding="0"
+                        AutomationProperties.Name="Settings"
+                        Background="Transparent"
+                        BorderThickness="0"
+                        Command="{x:Bind ViewModel.ShowSettingsCommand}"
+                        ToolTipService.ToolTip="Settings">
+                        <Button.Content>
+                            <AnimatedIcon
+                                x:Name="SettingsAnimatedIcon"
+                                Width="14"
+                                Height="14">
+                                <animatedvisuals:AnimatedSettingsVisualSource />
+                                <AnimatedIcon.FallbackIconSource>
+                                    <SymbolIconSource Symbol="Setting" />
+                                </AnimatedIcon.FallbackIconSource>
+                            </AnimatedIcon>
+                        </Button.Content>
+                    </Button>
+                </StackPanel>
+            </controls:TitleBar.Footer>
+        </controls:TitleBar>
+        <Frame
+            x:Name="ContentFrame"
+            Grid.Row="1"
+            Background="{ThemeResource LayerFillColorDefaultBrush}" />
+
+        <Border
+            x:Name="SelectionOverlay"
+            Grid.Row="1"
+            Margin="20,0,20,48"
+            Padding="12,10"
+            HorizontalAlignment="Stretch"
+            VerticalAlignment="Bottom"
+            AutomationProperties.Name="Selection actions"
+            Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+            BorderThickness="1"
+            CornerRadius="8"
+            IsHitTestVisible="False"
+            Opacity="0"
+            Visibility="Collapsed">
+            <Border.RenderTransform>
+                <TranslateTransform Y="8" />
+            </Border.RenderTransform>
+            <Grid ColumnSpacing="12">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <StackPanel
+                    Grid.Column="0"
+                    VerticalAlignment="Center"
+                    Orientation="Horizontal"
+                    Spacing="8">
+                    <FontIcon VerticalAlignment="Center" Glyph="&#xE8B7;" />
+                    <TextBlock VerticalAlignment="Center" FontWeight="SemiBold">
+                        <Run Text="{x:Bind ViewModel.SelectedMountCount, Mode=OneWay}" /><Run Text=" selected" />
+                    </TextBlock>
+                </StackPanel>
+                <StackPanel
+                    Grid.Column="2"
+                    Orientation="Horizontal"
+                    Spacing="8">
+                    <Button
+                        AutomationProperties.Name="Select all mounts"
+                        Command="{x:Bind ViewModel.SelectAllCommand}"
+                        ToolTipService.ToolTip="{x:Bind ViewModel.SelectAllButtonText, Mode=OneWay}"
+                        Visibility="{x:Bind ViewModel.SelectAllVisibility, Mode=OneWay}">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <FontIcon FontSize="14" Glyph="&#xE762;" />
+                            <TextBlock Text="{x:Bind ViewModel.SelectAllButtonText, Mode=OneWay}" />
+                        </StackPanel>
+                    </Button>
+                    <Button
+                        AutomationProperties.Name="Browse selected mounts"
+                        Command="{x:Bind ViewModel.BrowseSelectedCommand}"
+                        ToolTipService.ToolTip="Browse in Explorer"
+                        Visibility="{x:Bind ViewModel.BrowseButtonVisibility, Mode=OneWay}">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <SymbolIcon Symbol="OpenLocal" />
+                            <TextBlock Text="Browse" />
+                        </StackPanel>
+                    </Button>
+                    <Button Command="{x:Bind ViewModel.EditSelectedCommand}" Visibility="{x:Bind ViewModel.EditButtonVisibility, Mode=OneWay}">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <SymbolIcon Symbol="Edit" />
+                            <TextBlock Text="Edit" />
+                        </StackPanel>
+                    </Button>
+                    <Button
+                        AutomationProperties.Name="Enable selected mounts"
+                        Command="{x:Bind ViewModel.EnableSelectedCommand}"
+                        ToolTipService.ToolTip="Enable (mount from configuration)"
+                        Visibility="{x:Bind ViewModel.EnableButtonVisibility, Mode=OneWay}">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <FontIcon FontSize="14" Glyph="&#xE768;" />
+                            <TextBlock Text="Enable" />
+                        </StackPanel>
+                    </Button>
+                    <Button
+                        AutomationProperties.Name="Disable selected mounts"
+                        Command="{x:Bind ViewModel.DisableSelectedCommand}"
+                        ToolTipService.ToolTip="Disable (unmount, keep configuration)"
+                        Visibility="{x:Bind ViewModel.DisableButtonVisibility, Mode=OneWay}">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <FontIcon FontSize="14" Glyph="&#xE8D8;" />
+                            <TextBlock Text="Disable" />
+                        </StackPanel>
+                    </Button>
+                    <Button Command="{x:Bind ViewModel.UnmountSelectedCommand}">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <SymbolIcon Symbol="Delete" />
+                            <TextBlock Text="Unmount" />
+                        </StackPanel>
+                    </Button>
+                </StackPanel>
+            </Grid>
+        </Border>
+    </Grid>
+</Window>

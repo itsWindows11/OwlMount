@@ -67,6 +67,8 @@ static partial class Program
         string? nfsPath    = "/";
         // Archive
         string? archiveFile = null;
+        // Memory
+        long? memorySizeBytes = null;
 
         for (int i = 0; i < args.Length; i++)
         {
@@ -94,6 +96,22 @@ static partial class Program
                 case "--readonly":
                     forceReadOnly = true;
                     break;
+                case "--memory-size":
+                {
+                    string raw = args[++i].Trim().ToUpperInvariant();
+                    if (raw.EndsWith("G") && ulong.TryParse(raw[..^1], out ulong gb))
+                        memorySizeBytes = (long)(gb * 1024UL * 1024 * 1024);
+                    else if (raw.EndsWith("M") && ulong.TryParse(raw[..^1], out ulong mb))
+                        memorySizeBytes = (long)(mb * 1024UL * 1024);
+                    else if (ulong.TryParse(raw, out ulong byteVal))
+                        memorySizeBytes = (long)byteVal;
+                    else
+                    {
+                        Console.Error.WriteLine($"Error: invalid --memory-size value '{args[i]}'. Use e.g. 4G, 512M, or bytes.");
+                        return 1;
+                    }
+                    break;
+                }
             }
         }
 
@@ -120,7 +138,7 @@ static partial class Program
             case "memory":
                 root = new MemoryFolder(id: "memory-root", name: "memory-root");
                 displayRoot = "(in-memory, starts empty)";
-                (totalSize, freeSize) = GetMemoryVolumeSpace();
+                (totalSize, freeSize) = GetMemoryVolumeSpace(memorySizeBytes);
                 break;
 
             // ── archive ───────────────────────────────────────────────────────
@@ -278,20 +296,20 @@ static partial class Program
         }
 
         // ── Derive defaults ───────────────────────────────────────────────────
+        string driveLetter = letter.TrimEnd(':').ToUpperInvariant();
         string resolvedLabel = label ?? provider.ToUpperInvariant() switch
         {
-            "MEMORY"    => "OwlMount (Memory)",
-            "ARCHIVE"   => "OwlMount (Archive)",
-            "LOCAL"     => "OwlMount (Local)",
-            "KUBO-MFS"  => "OwlMount (MFS)",
-            "KUBO-IPFS" => "OwlMount (IPFS)",
-            "KUBO-IPNS" => "OwlMount (IPNS)",
-            "S3"        => "OwlMount (S3)",
-            "NFS"       => "OwlMount (NFS)",
-            _           => "OwlMount",
+            "MEMORY"    => $"OwlMount-Memory-{driveLetter}",
+            "ARCHIVE"   => $"OwlMount-Archive-{driveLetter}",
+            "LOCAL"     => $"OwlMount-Local-{driveLetter}",
+            "KUBO-MFS"  => $"OwlMount-MFS-{driveLetter}",
+            "KUBO-IPFS" => $"OwlMount-IPFS-{driveLetter}",
+            "KUBO-IPNS" => $"OwlMount-IPNS-{driveLetter}",
+            "S3"        => $"OwlMount-S3-{driveLetter}",
+            "NFS"       => $"OwlMount-NFS-{driveLetter}",
+            _           => $"OwlMount-{driveLetter}",
         };
 
-        string driveLetter = letter.TrimEnd(':').ToUpperInvariant();
         string mountPoint  = driveLetter + ":";
 
         // ProjFS is always read-only; ensure the flag reflects reality
@@ -348,9 +366,10 @@ static partial class Program
         {
             vfsBackend = new WinFspBackend(
                 root, blockCache, rangeReaders, sizeProviders,
-                readOnly:  isReadOnly,
-                totalSize: totalSize,
-                freeSize:  freeSize);
+                readOnly:    isReadOnly,
+                totalSize:   totalSize,
+                freeSize:    freeSize,
+                volumeLabel: resolvedLabel);
         }
 
         // DispatcherStopped (WinFsp) or equivalent fires when the drive is ejected externally.
@@ -538,7 +557,7 @@ static partial class Program
         Console.WriteLine("  --label      Volume label shown in Explorer (default: auto)");
         Console.WriteLine("  --read-only  Force the mounted filesystem to open as read-only");
         Console.WriteLine();
-        Console.WriteLine("  memory       (no extra flags; drive starts empty)");
+        Console.WriteLine("  memory       --memory-size <limit>  (e.g. 4G, 512M, or bytes; capped at available RAM)");
         Console.WriteLine("  archive      --archive-file <local-archive-path>");
         Console.WriteLine("  local        --path <local-directory-path>");
         Console.WriteLine("  kubo-mfs     --path <mfs-path>  [--api-url http://127.0.0.1:5001]");
@@ -552,6 +571,7 @@ static partial class Program
         Console.WriteLine();
         Console.WriteLine("Examples:");
         Console.WriteLine("  owlmount mount --provider memory --letter R");
+        Console.WriteLine("  owlmount mount --provider memory --letter R --memory-size 2G");
         Console.WriteLine("  owlmount mount --provider memory --letter R --read-only");
         Console.WriteLine("  owlmount mount --provider memory --letter R --backend projfs");
         Console.WriteLine("  owlmount mount --provider archive --archive-file C:\\data\\backup.zip --letter A");
@@ -582,15 +602,20 @@ static partial class Program
 
     // ── Volume size helpers ───────────────────────────────────────────────────
 
-    static (ulong? TotalSize, ulong? FreeSize) GetMemoryVolumeSpace()
+    static (ulong? TotalSize, ulong? FreeSize) GetMemoryVolumeSpace(long? limitBytes = null)
     {
         var gcInfo = GC.GetGCMemoryInfo();
         if (gcInfo.TotalAvailableMemoryBytes <= 0)
             return (null, null);
 
-        ulong total = (ulong)gcInfo.TotalAvailableMemoryBytes;
-        ulong used  = (ulong)Math.Max(GC.GetTotalMemory(forceFullCollection: false), 0L);
-        ulong free  = used >= total ? 0 : total - used;
+        ulong physicalTotal = (ulong)gcInfo.TotalAvailableMemoryBytes;
+        ulong used          = (ulong)Math.Max(GC.GetTotalMemory(forceFullCollection: false), 0L);
+        ulong physicalFree  = used >= physicalTotal ? 0 : physicalTotal - used;
+
+        ulong total = limitBytes.HasValue
+            ? Math.Min((ulong)limitBytes.Value, physicalTotal)
+            : physicalTotal;
+        ulong free  = Math.Min(physicalFree, total);
         return (total, free);
     }
 

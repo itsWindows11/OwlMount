@@ -1,0 +1,174 @@
+<Page
+    x:Class="OwlMount.WinUI.Views.SettingsPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:controls="using:CommunityToolkit.WinUI.Controls"
+    xmlns:converters="using:OwlMount.WinUI.Converters"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:x1="using:System"
+    mc:Ignorable="d">
+
+    <Page.Resources>
+        <converters:ElementThemeDisplayConverter x:Key="ElementThemeDisplayConverter" />
+    </Page.Resources>
+
+    <ScrollViewer>
+        <StackPanel Padding="20" Spacing="8">
+            <StackPanel.Transitions>
+                <TransitionCollection>
+                    <EntranceThemeTransition IsStaggeringEnabled="True" />
+                </TransitionCollection>
+            </StackPanel.Transitions>
+            <TextBlock
+                FontSize="24"
+                FontWeight="SemiBold"
+                Text="Settings" />
+
+            <TextBlock
+                Margin="0,12,0,4"
+                FontWeight="SemiBold"
+                Text="General" />
+
+            <controls:SettingsCard Header="Theme">
+                <ComboBox
+                    Width="180"
+                    HorizontalAlignment="Right"
+                    AutomationProperties.Name="Theme"
+                    ItemsSource="{x:Bind ViewModel.ThemeOptions, Mode=OneWay}"
+                    SelectedItem="{x:Bind ViewModel.SelectedTheme, Mode=TwoWay}">
+                    <ComboBox.ItemTemplate>
+                        <DataTemplate x:DataType="x1:Object">
+                            <TextBlock Text="{Binding Converter={StaticResource ElementThemeDisplayConverter}}" />
+                        </DataTemplate>
+                    </ComboBox.ItemTemplate>
+                </ComboBox>
+            </controls:SettingsCard>
+
+            <controls:SettingsCard Header="Mount configuration persistence">
+                <ToggleSwitch
+                    HorizontalAlignment="Right"
+                    AutomationProperties.Name="Mount configuration persistence"
+                    IsOn="{x:Bind ViewModel.SaveMountConfigurations, Mode=TwoWay}" />
+            </controls:SettingsCard>
+
+            <controls:SettingsExpander
+                Description="Export memory-based files on exit."
+                Header="In-memory filesystem export"
+                IsExpanded="False">
+                <controls:SettingsExpander.Items>
+                    <controls:SettingsCard Header="Export path">
+                        <StackPanel Orientation="Horizontal" Spacing="12">
+                            <TextBox
+                                x:Name="ExportPathBox"
+                                MaxWidth="256"
+                                IsEnabled="{x:Bind ViewModel.IsPersistMemoryFsPathEnabled, Mode=OneWay}"
+                                IsReadOnly="True"
+                                PlaceholderText="Export folder"
+                                Text="{x:Bind ViewModel.PersistMemoryFsPath, Mode=TwoWay}" />
+
+                            <Button
+                                Grid.Column="1"
+                                AutomationProperties.Name="Browse export path"
+                                Command="{x:Bind ViewModel.BrowseExportPathCommand}"
+                                Content="Browse"
+                                IsEnabled="{x:Bind ViewModel.IsPersistMemoryFsPathEnabled, Mode=OneWay}" />
+                        </StackPanel>
+                    </controls:SettingsCard>
+                </controls:SettingsExpander.Items>
+
+                <ToggleSwitch AutomationProperties.Name="In-memory filesystem export" IsOn="{x:Bind ViewModel.PersistMemoryFsOnExit, Mode=TwoWay}" />
+            </controls:SettingsExpander>
+
+            <TextBlock
+                Margin="0,12,0,4"
+                FontWeight="SemiBold"
+                Text="Advanced" />
+
+            <controls:SettingsExpander
+                Description="Maintenance actions for cached and residual data."
+                Header="Cache &amp; residue"
+                IsExpanded="False">
+                <Button
+                    AutomationProperties.Name="Clear all cache and residue"
+                    Command="{x:Bind ViewModel.ClearAllCacheCommand}"
+                    Content="Clear all"
+                    ToolTipService.ToolTip="Clear disk cache and ProjFS residue" />
+                <controls:SettingsExpander.Items>
+                    <controls:SettingsCard Description="Removes cached block data downloaded by remote providers (S3, NFS, IPFS…). This does not affect active mounts." Header="Clear disk cache">
+                        <StackPanel Orientation="Horizontal" Spacing="12">
+                            <TextBlock
+                                VerticalAlignment="Center"
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                Text="{x:Bind ViewModel.ClearCacheStatusText, Mode=OneWay}" />
+                            <Button
+                                AutomationProperties.Name="Clear disk cache"
+                                Command="{x:Bind ViewModel.ClearDiskCacheCommand}"
+                                Content="Clear" />
+                        </StackPanel>
+                    </controls:SettingsCard>
+                    <controls:SettingsCard Description="Removes leftover ProjFS virtualisation-root directories from drives that are no longer mounted." Header="Clear ProjFS residue">
+                        <StackPanel Orientation="Horizontal" Spacing="12">
+                            <TextBlock
+                                VerticalAlignment="Center"
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                Text="{x:Bind ViewModel.ClearProjFsStatusText, Mode=OneWay}" />
+                            <Button
+                                AutomationProperties.Name="Clear ProjFS residue"
+                                Command="{x:Bind ViewModel.ClearProjFsResidueCommand}"
+                                Content="Clear" />
+                        </StackPanel>
+                    </controls:SettingsCard>
+                </controls:SettingsExpander.Items>
+            </controls:SettingsExpander>
+
+            <controls:SettingsExpander Header="Enable block cache">
+                <ToggleSwitch
+                    HorizontalAlignment="Right"
+                    AutomationProperties.Name="Enable block cache"
+                    IsOn="{x:Bind ViewModel.EnableBlockCache, Mode=TwoWay}" />
+                <controls:SettingsExpander.Items>
+                    <controls:SettingsCard Description="Block size for disk cache operations." Header="Default block cache size">
+                        <ComboBox
+                            x:Name="BlockCacheSizeComboBox"
+                            Width="180"
+                            HorizontalAlignment="Right"
+                            AutomationProperties.Name="Default block cache size"
+                            IsEnabled="{x:Bind ViewModel.EnableBlockCache, Mode=OneWay}"
+                            Loaded="BlockCacheSizeComboBox_Loaded"
+                            SelectionChanged="BlockCacheSizeComboBox_SelectionChanged">
+                            <ComboBoxItem Tag="65536">64 KiB</ComboBoxItem>
+                            <ComboBoxItem Tag="131072">128 KiB</ComboBoxItem>
+                            <ComboBoxItem Tag="262144">256 KiB (default)</ComboBoxItem>
+                            <ComboBoxItem Tag="524288">512 KiB</ComboBoxItem>
+                            <ComboBoxItem Tag="1048576">1 MiB</ComboBoxItem>
+                            <ComboBoxItem Tag="2097152">2 MiB</ComboBoxItem>
+                        </ComboBox>
+                    </controls:SettingsCard>
+                </controls:SettingsExpander.Items>
+            </controls:SettingsExpander>
+
+            <controls:SettingsCard Description="Export and import mount configurations and settings." Header="Configuration backup">
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <Button
+                        AutomationProperties.Name="Export configuration"
+                        Command="{x:Bind ViewModel.ExportConfigurationCommand}"
+                        Content="Export" />
+                    <Button
+                        AutomationProperties.Name="Import configuration"
+                        Command="{x:Bind ViewModel.ImportConfigurationCommand}"
+                        Content="Import" />
+                </StackPanel>
+            </controls:SettingsCard>
+
+            <TextBlock
+                Margin="0,12,0,4"
+                FontWeight="SemiBold"
+                Text="About" />
+
+            <controls:SettingsCard Description="{x:Bind ViewModel.CopyrightText}" Header="{x:Bind ViewModel.AppVersion}">
+                <HyperlinkButton Content="Project website" NavigateUri="{x:Bind ViewModel.ProjectUrl}" />
+            </controls:SettingsCard>
+        </StackPanel>
+    </ScrollViewer>
+</Page>

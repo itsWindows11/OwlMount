@@ -1,6 +1,6 @@
 # OwlMount
 
-A Windows-only .NET 10 console application that mounts any
+A Windows-only .NET 10 application that mounts any
 [OwlCore.Storage](https://github.com/Arlodotexe/OwlCore.Storage) `IFolder` provider as a
 Windows drive letter. Two filesystem backends are available:
 
@@ -11,19 +11,16 @@ Windows drive letter. Two filesystem backends are available:
 
 ## Features
 
+* **WinUI 3 GUI** — full-featured desktop app with per-mount cards, selection overlay, and system-tray integration
 * **Dual-backend** — choose WinFsp for read-write, or ProjFS for zero-install read-only
-* **Backend abstraction layer** — `IOwlMountBackend` interface separates mount logic from the CLI
+* **Backend abstraction layer** — `IOwlMountBackend` interface separates mount logic from the UI/CLI
 * **Read-write support** (WinFsp) — create, write, rename, and delete files/folders
-* **Read-only** support (ProjFS / `--read-only` flag)
-* **Block cache** — 256 KiB blocks persisted to disk under
-  `%LocalAppData%\OwlMount\Cache\` to avoid re-downloading data
-* **Adapter registry** — plug in custom `IRangeReader` / `ISizeProvider`
-  implementations for specific provider types without touching core VFS logic
-* **Path index** — in-memory normalized-path → entry map populated during
-  directory enumeration; avoids redundant provider look-ups
-* **Directory cache** (WinFsp) — short TTL (15 s default) per-folder listing cache for
-  snappy Explorer browsing; invalidated automatically on write operations
-* **In-memory provider** — zero-config drive backed by `OwlCore.Storage.Memory`; great for testing and ephemeral scratch space
+* **Read-only support** (ProjFS / `--read-only` flag)
+* **Block cache** — 256 KiB blocks persisted to disk under `%LocalAppData%\OwlMount\Cache\` to avoid re-downloading data
+* **Adapter registry** — plug in custom `IRangeReader` / `ISizeProvider` implementations without touching core VFS logic
+* **Path index** — in-memory normalized-path → entry map populated during directory enumeration
+* **Directory cache** (WinFsp) — short TTL (15 s default) per-folder listing cache; invalidated automatically on write operations
+* **In-memory provider** — zero-config drive backed by `OwlCore.Storage.Memory`; configurable RAM size limit
 * **Archive provider** — mount any `.zip`, `.tar`, `.rar`, etc. file read-only
 
 ## Prerequisites
@@ -45,7 +42,30 @@ cd OwlMount
 dotnet build
 ```
 
-## Running
+## WinUI 3 GUI
+
+The GUI app (`src/OwlMount.WinUI/`) provides a fully in-process mount/unmount workflow with parity to the CLI.
+
+```bash
+dotnet run --project src/OwlMount.WinUI/OwlMount.WinUI.csproj
+```
+
+### GUI features
+
+* **Mount listing** — each active mount is shown as a card with drive letter, label, provider, capacity, and state
+* **Per-mount context menu** — right-click any card to **Edit**, **Unmount**, or open Windows **Properties** for that drive
+* **Selection overlay** — check one or more mounts to reveal a floating action bar with Edit (single selection only) and Unmount buttons
+* **Add mount dialog** — choose provider, backend, drive letter, label, and provider-specific settings
+* **Memory size limit** — when adding a memory drive, a slider lets you pick the maximum RAM the drive can use (capped at the PC's currently free physical memory)
+* **System tray** — closing the window hides to tray; right-click the icon for **Open OwlMount**, **Settings**, per-drive **Unmount**, or **Exit**
+* **Settings page** (reachable from the title bar button, `ShowSettingsCommand`, or tray **Settings**):
+  - **Theme** — Default / Light / Dark
+  - **Mount configuration persistence** — save mount points across restarts
+  - **In-memory filesystem export** — export RAM-drive contents to a folder on exit
+  - **Maintenance — Clear disk cache** — deletes all block-cache files under `%LocalAppData%\OwlMount\Cache\`; frees space used by remote provider caches
+  - **Maintenance — Clear ProjFS residue** — deletes leftover virtualisation-root directories under `%LocalAppData%\OwlMount\VirtRoot\` from drives that are no longer mounted
+
+## Running (CLI)
 
 ```bat
 owlmount mount --provider memory --letter R
@@ -60,8 +80,9 @@ owlmount mount --provider memory --letter R
 | `--letter` | `M` | Drive letter to mount (without the colon) |
 | `--label` | *(auto)* | Volume label shown in Explorer (e.g. `"My Files"`) |
 | `--read-only` | *(off)* | Force read-only mode (always set for ProjFS and archive) |
+| `--memory-size` | *(free RAM)* | Maximum RAM size in MiB for the `memory` provider |
 
-Pressing **Ctrl+C**, running `owlmount unmount --letter <X>` from another terminal, or ejecting/unmounting the drive from Windows Explorer all cleanly exit the process.
+Pressing **Ctrl+C**, running `owlmount unmount --letter <X>` from another terminal, or ejecting the drive from Explorer all cleanly exit the process.
 
 ### Subcommands
 
@@ -75,8 +96,8 @@ Pressing **Ctrl+C**, running `owlmount unmount --letter <X>` from another termin
 
 | `--provider` | Extra flags | Description |
 |---|---|---|
-| `memory` | *(none)* | Empty in-memory filesystem (default; lives until process exits) |
-| `archive` | `--archive-file <path>` | Any archive format (zip, tar, rar, …) via SharpCompress |
+| `memory` | `[--memory-size <MiB>]` | Empty in-memory filesystem (lives until process exits) |
+| `archive` | `--archive-file <path>` | Any archive format (zip, tar, rar, …) via SharpCompress — read-only |
 | `local` | `--path <dir>` | Local directory exposed as a drive letter |
 | `kubo-mfs` | `--path <mfs-path>` `[--api-url]` | Kubo MFS (Mutable File System) |
 | `kubo-ipfs` | `--cid <CID>` `[--api-url]` | Immutable IPFS directory by CID |
@@ -86,16 +107,20 @@ Pressing **Ctrl+C**, running `owlmount unmount --letter <X>` from another termin
 
 > Pass `--read-only` with any provider to suppress write support for that mount.
 >
-> Live folder refresh is enabled only for providers and folders that successfully expose `IFolderWatcher`; unsupported providers continue to rely on cache TTL and local invalidation.
+> The `archive` provider is always read-only.
 >
-> The `archive` provider is mounted read-only and reports volume capacity using the current free space on the local disk that stores the archive file.
->
-> **OneDrive** is supported as a code-level provider (`OneDriveFolder` / `OneDriveFile` from `OwlCore.Storage.OneDrive`) but requires a pre-authenticated `GraphServiceClient` from MSAL — see the *Adding a custom provider* section.
+> **OneDrive** is supported as a code-level provider (`OneDriveFolder` / `OneDriveFile` from `OwlCore.Storage.OneDrive`) but requires a pre-authenticated `GraphServiceClient` from MSAL — see *Adding a custom provider* below.
 
 ### Example — empty in-memory filesystem as `R:` (WinFsp, read-write)
 
 ```bat
 owlmount mount --provider memory --letter R --label "RAM Drive"
+```
+
+### Example — memory drive limited to 2 GB
+
+```bat
+owlmount mount --provider memory --letter R --label "RAM Drive" --memory-size 2048
 ```
 
 ### Example — same drive via ProjFS (read-only, no WinFsp needed)
@@ -109,20 +134,6 @@ owlmount mount --provider memory --letter R --backend projfs
 ```bat
 owlmount mount --provider archive --archive-file C:\data\backup.zip --letter A
 ```
-
-### Example — same in-memory filesystem forced read-only
-
-```bat
-owlmount mount --provider memory --letter R --label "RAM Drive" --read-only
-```
-
-### Example — archive file as `A:`
-
-```bat
-owlmount mount --provider archive --archive-file C:\data\backup.zip --letter A
-```
-
-Mounts the contents of a local archive file as a read-only drive.
 
 ### Example — Kubo MFS as `K:`
 
@@ -157,6 +168,70 @@ OwlMount.slnx
 │   │   ├── IO/                       WildcardPattern (cross-platform utility)
 │   │   └── Registry/                 RangeReaderRegistry, SizeProviderRegistry,
 │   │                                 DefaultRangeReader, DefaultSizeProvider
+│   ├── OwlMount.Core.Windows/        Windows-only .NET 10 library
+│   │   ├── Backends/
+│   │   │   ├── IOwlMountBackend.cs   Abstraction interface (Start / Stop / Stopped)
+│   │   │   ├── WinFspBackend.cs      WinFsp implementation (read-write)
+│   │   │   └── ProjFsBackend.cs      ProjFS implementation (read-only)
+│   │   ├── OwlMountFileSystem.cs     WinFsp FileSystemBase implementation
+│   │   ├── OwlMountProvider.cs       ProjFS IRequiredCallbacks implementation
+│   │   ├── DirectoryCache.cs         TTL-based per-folder listing cache
+│   │   └── Contexts.cs               FileContext / FolderContext open-handle objects
+│   ├── OwlMount.WinFspHost/          Windows-only .NET 10 console app (CLI)
+│   │   └── Program.cs                CLI entry point
+│   └── OwlMount.WinUI/               Windows-only WinUI 3 desktop app
+│       ├── Services/
+│       │   ├── MountService.cs       In-process mount lifecycle + config persistence
+│       │   ├── ProviderFactory.cs    Builds IFolder root from ProviderOptions
+│       │   ├── ProviderOptions.cs    All mount parameters (provider, backend, letter, …)
+│       │   ├── AppTrayService.cs     System-tray icon, menu, and notifications
+│       │   ├── NavigationService.cs  Frame-level page navigation
+│       │   └── AppSettingsService.cs Theme and app-wide settings persistence
+│       ├── Views/
+│       │   ├── HomePage.xaml         Mount listing, selection overlay, empty state
+│       │   ├── SettingsPage.xaml     Settings + Maintenance section
+│       │   └── MountConfigDialog.xaml Add/edit mount dialog
+│       ├── MainWindow.xaml           Window shell, title bar, selection overlay
+│       └── MainWindowViewModel.cs    App state, mount commands, selection logic
+└── tests/
+    └── OwlMount.Tests/               Cross-platform xUnit tests
+```
+
+### Block cache location
+
+```
+%LocalAppData%\OwlMount\Cache\<providerId>\<fileHash>_<blockIndex>.blk
+```
+
+Block size defaults to **256 KiB**; pass a custom value to the `BlockCache` constructor.
+
+### ProjFS virtualisation root
+
+ProjFS requires a physical directory as a virtualisation root (API requirement).
+It is stored at `%LocalAppData%\OwlMount\VirtRoot\<DriveLetter>\` and cleaned up on every mount start.
+Orphaned directories (from crashes) can be removed from Settings → **Clear ProjFS residue**.
+
+### Adding a custom provider
+
+1. Create a class implementing `OwlCore.Storage.IFolder` (and `IFile` for its children).
+2. Instantiate your `IFolder` in `ProviderFactory.cs` (GUI) or `Program.cs` (CLI) and pass it to the chosen backend.
+3. Optionally register a provider-specific `IRangeReader` for optimised ranged reads:
+
+```csharp
+rangeReaders.Register(
+    matcher: f => f is MyCustomFile,
+    reader:  new MyCustomRangeReader());
+```
+
+## Running Tests
+
+```bash
+dotnet test tests/OwlMount.Tests/
+```
+
+Tests are cross-platform (Windows-only tests skip automatically on other platforms).
+
+│   │                                 DefaultRangeReader, DefaultSizeProvider
 │   └── OwlMount.WinFspHost/          Windows-only .NET 10 console app
 │       ├── Backends/
 │       │   ├── IOwlMountBackend.cs   Abstraction interface (Start / Stop / Stopped)
@@ -167,6 +242,10 @@ OwlMount.slnx
 │       ├── DirectoryCache.cs         TTL-based per-folder listing cache
 │       ├── Contexts.cs               FileContext / FolderContext open-handle objects
 │       └── Program.cs                CLI entry point
+│   └── OwlMount.WinUI/               Windows-only WinUI 3 desktop app
+│       ├── Services/                 In-process mount service + provider factory
+│       ├── MainWindow.xaml           Responsive GUI (narrow / normal / wide layouts)
+│       └── MainWindow.xaml.cs        GUI logic (in-process mount/unmount via MountService)
 └── tests/
     └── OwlMount.Tests/               Cross-platform xUnit tests
         ├── PathNormalizationTests.cs
