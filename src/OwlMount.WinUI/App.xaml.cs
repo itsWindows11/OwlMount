@@ -32,6 +32,7 @@ public partial class App : Application
         services.AddSingleton<IAppExitService>(sp => sp.GetRequiredService<AppExitService>());
         services.AddSingleton<IAppTrayService, AppTrayService>();
         services.AddSingleton<INavigationService, NavigationService>();
+        services.AddSingleton(sp => new MountService(sp.GetRequiredService<AppSettingsService>()));
         services.AddSingleton(sp => new MainWindowViewModel(
             sp.GetRequiredService<MountService>(),
             sp.GetRequiredService<IAppExitService>(),
@@ -47,6 +48,9 @@ public partial class App : Application
 
     protected override void OnLaunched(LaunchActivatedEventArgs args)
     {
+        // Load app settings early
+        AppSettings.Load();
+
         AppExitService.SetExitAction(ExitApp);
         MountService.MountsChanged += OnMountsChanged;
         _ = Services.GetRequiredService<LocalLogService>().InfoAsync("Application launched.");

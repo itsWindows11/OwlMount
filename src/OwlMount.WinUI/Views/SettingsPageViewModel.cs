@@ -19,11 +19,15 @@ public partial class SettingsPageViewModel : ObservableObject
     private string _persistMemoryFsPath = string.Empty;
     private bool _isPersistMemoryFsPathEnabled;
     private ElementTheme _selectedTheme;
+    private long _defaultBlockCacheSizeBytes;
+    private bool _enableBlockCache;
 
     public IAsyncRelayCommand BrowseExportPathCommand { get; }
     public IAsyncRelayCommand ClearDiskCacheCommand { get; }
     public IAsyncRelayCommand ClearProjFsResidueCommand { get; }
     public IAsyncRelayCommand ClearAllCacheCommand { get; }
+    public IAsyncRelayCommand ExportConfigurationCommand { get; }
+    public IAsyncRelayCommand ImportConfigurationCommand { get; }
 
     public IReadOnlyList<ElementTheme> ThemeOptions { get; } = [ElementTheme.Default, ElementTheme.Light, ElementTheme.Dark];
 
@@ -87,6 +91,32 @@ public partial class SettingsPageViewModel : ObservableObject
         }
     }
 
+    public long DefaultBlockCacheSizeBytes
+    {
+        get => _defaultBlockCacheSizeBytes;
+        set
+        {
+            if (SetProperty(ref _defaultBlockCacheSizeBytes, value) && value > 0)
+            {
+                _settingsService.SetDefaultBlockCacheSize(value);
+                _ = _log.InfoAsync($"Default block cache size changed to {FormatBytes(value)}.");
+            }
+        }
+    }
+
+    public bool EnableBlockCache
+    {
+        get => _enableBlockCache;
+        set
+        {
+            if (SetProperty(ref _enableBlockCache, value))
+            {
+                _settingsService.SetEnableBlockCache(value);
+                _ = _log.InfoAsync($"Block cache {(value ? "enabled" : "disabled")}.");
+            }
+        }
+    }
+
     public Uri ProjectUrl { get; } = new("https://github.com/itsWindows11/OwlMount");
     public string AppVersion { get; } = $"OwlMount {typeof(App).Assembly.GetName().Version}";
     public string CopyrightText { get; } = "Copyright \u00a9 2026 itsWindows11 & OwlMount contributors";
@@ -103,8 +133,12 @@ public partial class SettingsPageViewModel : ObservableObject
         ClearDiskCacheCommand = new AsyncRelayCommand(ClearDiskCacheAsync);
         ClearProjFsResidueCommand = new AsyncRelayCommand(ClearProjFsResidueAsync);
         ClearAllCacheCommand = new AsyncRelayCommand(ClearAllCacheAsync);
+        ExportConfigurationCommand = new AsyncRelayCommand(ExportConfigurationAsync);
+        ImportConfigurationCommand = new AsyncRelayCommand(ImportConfigurationAsync);
 
         _selectedTheme = _settingsService.Theme;
+        _defaultBlockCacheSizeBytes = _settingsService.DefaultBlockCacheSizeBytes;
+        _enableBlockCache = _settingsService.EnableBlockCache;
         _saveMountConfigurations = _mountService.SaveMountPointConfigurations;
         _persistMemoryFsOnExit = _mountService.PersistMemoryFileSystemOnExit;
         _persistMemoryFsPath = _mountService.MemoryFileSystemPersistPath;
@@ -149,6 +183,111 @@ public partial class SettingsPageViewModel : ObservableObject
         ClearCacheStatusText = cacheFreed > 0 ? $"Cleared {FormatBytes(cacheFreed)}." : "Nothing to clear.";
         ClearProjFsStatusText = residueFreed > 0 ? $"Cleared {FormatBytes(residueFreed)}." : "Nothing to clear.";
         _ = _log.InfoAsync($"Clear all: cache {cacheFreed} B, residue {residueFreed} B.");
+    }
+
+    private async Task ExportConfigurationAsync()
+    {
+        try
+        {
+            var picker = new FileSavePicker
+            {
+                SuggestedStartLocation = PickerLocationId.DocumentsLibrary,
+                DefaultFileExtension = ".json",
+                FileTypeChoices = { { "JSON Configuration", new[] { ".json" } } }
+            };
+
+            var window = _windowProvider();
+            if (window is not null)
+            {
+                InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(window));
+            }
+
+            var file = await picker.PickSaveFileAsync();
+            if (file is null)
+                return;
+
+            _mountService.ExportConfigurationToFile(file.Path);
+            _ = _log.InfoAsync($"Configuration exported to {file.Name}");
+        }
+        catch (Exception ex)
+        {
+            _ = _log.ErrorAsync($"Failed to export configuration: {ex.Message}");
+        }
+    }
+
+    private async Task ImportConfigurationAsync()
+    {
+        try
+        {
+            var picker = new FileOpenPicker
+            {
+                SuggestedStartLocation = PickerLocationId.DocumentsLibrary,
+                FileTypeFilter = { ".json" }
+            };
+
+            var window = _windowProvider();
+            if (window is not null)
+            {
+                InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(window));
+            }
+
+            var file = await picker.PickSingleFileAsync();
+            if (file is null)
+                return;
+
+            // Show import options dialog
+            var dialog = new ContentDialog
+            {
+                Title = "Import Options",
+                Content = new StackPanel
+                {
+                    Spacing = 12,
+                    Children =
+                    {
+                        new TextBlock { Text = "Select what to import:", FontWeight = Microsoft.UI.Text.FontWeights.SemiBold },
+                        new CheckBox { Name = "MountPointsCheckBox", Content = "Mount points", IsChecked = true },
+                        new CheckBox { Name = "SettingsCheckBox", Content = "Application settings", IsChecked = true },
+                    }
+                },
+                PrimaryButtonText = "Import",
+                CloseButtonText = "Cancel",
+                DefaultButton = ContentDialogButton.Primary
+            };
+
+            if (window is not null)
+            {
+                dialog.XamlRoot = window.Content.XamlRoot;
+            }
+
+            var result = await dialog.ShowAsync();
+            if (result != ContentDialogResult.Primary)
+                return;
+
+            // Get checkbox states
+            bool importMountPoints = true;
+            bool importSettings = true;
+
+            if (dialog.Content is StackPanel sp)
+            {
+                foreach (var child in sp.Children)
+                {
+                    if (child is CheckBox cb)
+                    {
+                        if (cb.Name == "MountPointsCheckBox")
+                            importMountPoints = cb.IsChecked ?? false;
+                        else if (cb.Name == "SettingsCheckBox")
+                            importSettings = cb.IsChecked ?? false;
+                    }
+                }
+            }
+
+            _mountService.ImportConfigurationFromFile(file.Path, importMountPoints: importMountPoints, importSettings: importSettings);
+            _ = _log.InfoAsync($"Configuration imported from {file.Name}");
+        }
+        catch (Exception ex)
+        {
+            _ = _log.ErrorAsync($"Failed to import configuration: {ex.Message}");
+        }
     }
 
     private static string FormatBytes(long bytes) => bytes switch

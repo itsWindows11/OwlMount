@@ -17,6 +17,19 @@ public sealed class ProviderOptions
     /// </summary>
     public long? MemorySizeLimitBytes { get; init; }
 
+    // Block cache settings
+    /// <summary>
+    /// Whether to enable block cache for this mount.
+    /// When null, uses the global setting from AppSettingsService.
+    /// </summary>
+    public bool? EnableBlockCache { get; init; }
+
+    /// <summary>
+    /// Block cache size in bytes for this mount.
+    /// When null, uses the global setting from AppSettingsService.
+    /// </summary>
+    public long? BlockCacheSizeBytes { get; init; }
+
     // local / archive
     public string? Path { get; init; }
     public string? ArchiveFile { get; init; }

@@ -56,6 +56,30 @@ public sealed partial class MountConfigDialog : UserControl
         NfsHostBox.Text = existing?.NfsHost ?? string.Empty;
         NfsExportBox.Text = existing?.NfsExport ?? string.Empty;
         NfsPathBox.Text = existing?.NfsPath ?? "/";
+
+        // Initialize block cache settings
+        string enableBlockCacheText = existing?.EnableBlockCache switch
+        {
+            true => "Enabled",
+            false => "Disabled",
+            null => "Use global setting"
+        };
+        EnableBlockCacheBox.SelectedItem = EnableBlockCacheBox.Items.FirstOrDefault(i => 
+            i is ComboBoxItem item && item.Content?.ToString() == enableBlockCacheText) ?? 
+            EnableBlockCacheBox.Items[0];
+
+        // For size, find matching tag or default to "Use global setting"
+        if (existing?.BlockCacheSizeBytes is > 0)
+        {
+            BlockCacheSizeBox.SelectedItem = BlockCacheSizeBox.Items.FirstOrDefault(i =>
+                i is ComboBoxItem item && item.Tag?.ToString() == existing.BlockCacheSizeBytes.ToString()) ??
+                BlockCacheSizeBox.Items[0];
+        }
+        else
+        {
+            BlockCacheSizeBox.SelectedItem = BlockCacheSizeBox.Items[0];
+        }
+
         UpdateVisibility();
     }
 
@@ -66,6 +90,26 @@ public sealed partial class MountConfigDialog : UserControl
             ? (long)MemorySizeSlider.Value * 1024 * 1024
             : null;
 
+        // Parse block cache settings (null if "Use global setting")
+        bool? enableBlockCache = null;
+        long? blockCacheSizeBytes = null;
+
+        if (EnableBlockCacheBox.SelectedItem is ComboBoxItem enableItem && enableItem.Content is string enableText)
+        {
+            enableBlockCache = enableText switch
+            {
+                "Enabled" => true,
+                "Disabled" => false,
+                _ => null
+            };
+        }
+
+        if (BlockCacheSizeBox.SelectedItem is ComboBoxItem sizeItem)
+        {
+            if (sizeItem.Tag is long sizeTag && sizeTag > 0)
+                blockCacheSizeBytes = sizeTag;
+        }
+
         return new()
         {
             Provider = provider,
@@ -73,6 +117,8 @@ public sealed partial class MountConfigDialog : UserControl
             Letter = NormalizeDriveLetter(LetterBox.SelectedItem as string) ?? string.Empty,
             Label = string.IsNullOrWhiteSpace(LabelBox.Text) ? null : LabelBox.Text.Trim(),
             MemorySizeLimitBytes = memorySizeLimit,
+            EnableBlockCache = enableBlockCache,
+            BlockCacheSizeBytes = blockCacheSizeBytes,
             Path = string.IsNullOrWhiteSpace(PathBox.Text) ? null : PathBox.Text.Trim(),
             ArchiveFile = string.IsNullOrWhiteSpace(ArchiveBox.Text) ? null : ArchiveBox.Text.Trim(),
             ApiUrl = string.IsNullOrWhiteSpace(ApiUrlBox.Text) ? null : ApiUrlBox.Text.Trim(),

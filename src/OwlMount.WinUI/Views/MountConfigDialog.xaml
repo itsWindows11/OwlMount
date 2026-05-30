@@ -205,6 +205,39 @@
                     </controls:SettingsCard>
                 </controls:SettingsExpander.Items>
             </controls:SettingsExpander>
+
+            <controls:SettingsExpander
+                x:Name="BlockCacheSection"
+                Description="Configure block cache for this mount (leave empty to use global settings)."
+                Header="Block cache"
+                IsExpanded="False">
+                <controls:SettingsExpander.Items>
+                    <controls:SettingsCard Header="Enable block cache">
+                        <ComboBox
+                            x:Name="EnableBlockCacheBox"
+                            MinWidth="120">
+                            <ComboBoxItem>Use global setting</ComboBoxItem>
+                            <ComboBoxItem>Enabled</ComboBoxItem>
+                            <ComboBoxItem>Disabled</ComboBoxItem>
+                        </ComboBox>
+                    </controls:SettingsCard>
+                    <controls:SettingsCard
+                        Description="Leave empty to use global setting."
+                        Header="Block cache size">
+                        <ComboBox
+                            x:Name="BlockCacheSizeBox"
+                            MinWidth="120">
+                            <ComboBoxItem>Use global setting</ComboBoxItem>
+                            <ComboBoxItem Tag="65536">64 KiB</ComboBoxItem>
+                            <ComboBoxItem Tag="131072">128 KiB</ComboBoxItem>
+                            <ComboBoxItem Tag="262144">256 KiB</ComboBoxItem>
+                            <ComboBoxItem Tag="524288">512 KiB</ComboBoxItem>
+                            <ComboBoxItem Tag="1048576">1 MiB</ComboBoxItem>
+                            <ComboBoxItem Tag="2097152">2 MiB</ComboBoxItem>
+                        </ComboBox>
+                    </controls:SettingsCard>
+                </controls:SettingsExpander.Items>
+            </controls:SettingsExpander>
         </StackPanel>
     </ScrollViewer>
 </UserControl>

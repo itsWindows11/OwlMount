@@ -56,11 +56,6 @@
                 Description="Export memory-based files on exit."
                 Header="In-memory filesystem export"
                 IsExpanded="False">
-                <controls:SettingsExpander.Transitions>
-                    <TransitionCollection>
-                        <EntranceThemeTransition FromVerticalOffset="20" />
-                    </TransitionCollection>
-                </controls:SettingsExpander.Transitions>
                 <controls:SettingsExpander.Items>
                     <controls:SettingsCard Header="Export path">
                         <StackPanel Orientation="Horizontal" Spacing="12">
@@ -82,9 +77,7 @@
                     </controls:SettingsCard>
                 </controls:SettingsExpander.Items>
 
-                <ToggleSwitch
-                    AutomationProperties.Name="In-memory filesystem export"
-                    IsOn="{x:Bind ViewModel.PersistMemoryFsOnExit, Mode=TwoWay}" />
+                <ToggleSwitch AutomationProperties.Name="In-memory filesystem export" IsOn="{x:Bind ViewModel.PersistMemoryFsOnExit, Mode=TwoWay}" />
             </controls:SettingsExpander>
 
             <TextBlock
@@ -102,9 +95,7 @@
                     Content="Clear all"
                     ToolTipService.ToolTip="Clear disk cache and ProjFS residue" />
                 <controls:SettingsExpander.Items>
-                    <controls:SettingsCard
-                        Description="Removes cached block data downloaded by remote providers (S3, NFS, IPFS…). This does not affect active mounts."
-                        Header="Clear disk cache">
+                    <controls:SettingsCard Description="Removes cached block data downloaded by remote providers (S3, NFS, IPFS…). This does not affect active mounts." Header="Clear disk cache">
                         <StackPanel Orientation="Horizontal" Spacing="12">
                             <TextBlock
                                 VerticalAlignment="Center"
@@ -116,9 +107,7 @@
                                 Content="Clear" />
                         </StackPanel>
                     </controls:SettingsCard>
-                    <controls:SettingsCard
-                        Description="Removes leftover ProjFS virtualisation-root directories from drives that are no longer mounted."
-                        Header="Clear ProjFS residue">
+                    <controls:SettingsCard Description="Removes leftover ProjFS virtualisation-root directories from drives that are no longer mounted." Header="Clear ProjFS residue">
                         <StackPanel Orientation="Horizontal" Spacing="12">
                             <TextBlock
                                 VerticalAlignment="Center"
@@ -133,14 +122,51 @@
                 </controls:SettingsExpander.Items>
             </controls:SettingsExpander>
 
+            <controls:SettingsExpander Header="Enable block cache">
+                <ToggleSwitch
+                    HorizontalAlignment="Right"
+                    AutomationProperties.Name="Enable block cache"
+                    IsOn="{x:Bind ViewModel.EnableBlockCache, Mode=TwoWay}" />
+                <controls:SettingsExpander.Items>
+                    <controls:SettingsCard Description="Block size for disk cache operations." Header="Default block cache size">
+                        <ComboBox
+                            x:Name="BlockCacheSizeComboBox"
+                            Width="180"
+                            HorizontalAlignment="Right"
+                            AutomationProperties.Name="Default block cache size"
+                            IsEnabled="{x:Bind ViewModel.EnableBlockCache, Mode=OneWay}"
+                            Loaded="BlockCacheSizeComboBox_Loaded"
+                            SelectionChanged="BlockCacheSizeComboBox_SelectionChanged">
+                            <ComboBoxItem Tag="65536">64 KiB</ComboBoxItem>
+                            <ComboBoxItem Tag="131072">128 KiB</ComboBoxItem>
+                            <ComboBoxItem Tag="262144">256 KiB (default)</ComboBoxItem>
+                            <ComboBoxItem Tag="524288">512 KiB</ComboBoxItem>
+                            <ComboBoxItem Tag="1048576">1 MiB</ComboBoxItem>
+                            <ComboBoxItem Tag="2097152">2 MiB</ComboBoxItem>
+                        </ComboBox>
+                    </controls:SettingsCard>
+                </controls:SettingsExpander.Items>
+            </controls:SettingsExpander>
+
+            <controls:SettingsCard Description="Export and import mount configurations and settings." Header="Configuration backup">
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <Button
+                        AutomationProperties.Name="Export configuration"
+                        Command="{x:Bind ViewModel.ExportConfigurationCommand}"
+                        Content="Export" />
+                    <Button
+                        AutomationProperties.Name="Import configuration"
+                        Command="{x:Bind ViewModel.ImportConfigurationCommand}"
+                        Content="Import" />
+                </StackPanel>
+            </controls:SettingsCard>
+
             <TextBlock
                 Margin="0,12,0,4"
                 FontWeight="SemiBold"
                 Text="About" />
 
-            <controls:SettingsCard
-                Description="{x:Bind ViewModel.CopyrightText}"
-                Header="{x:Bind ViewModel.AppVersion}">
+            <controls:SettingsCard Description="{x:Bind ViewModel.CopyrightText}" Header="{x:Bind ViewModel.AppVersion}">
                 <HyperlinkButton Content="Project website" NavigateUri="{x:Bind ViewModel.ProjectUrl}" />
             </controls:SettingsCard>
         </StackPanel>

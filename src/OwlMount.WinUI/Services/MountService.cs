@@ -20,6 +20,7 @@ public sealed class MountService : IDisposable
         new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, ProviderOptions> _mountConfigurations =
         new(StringComparer.OrdinalIgnoreCase);
+    private readonly AppSettingsService _appSettings;
 
     private readonly SemaphoreSlim _stateSemaphore = new(1, 1);
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
@@ -28,8 +29,9 @@ public sealed class MountService : IDisposable
         new($"[{Regex.Escape(new string(Path.GetInvalidFileNameChars()))}]",
             RegexOptions.CultureInvariant);
 
-    public MountService()
+    public MountService(AppSettingsService appSettings)
     {
+        _appSettings = appSettings;
         LoadConfigurationState();
     }
 
@@ -113,10 +115,28 @@ public sealed class MountService : IDisposable
         if (pr.SizeProvider is not null && pr.SizePredicate is not null)
             sizeProviders.Register(pr.SizePredicate, pr.SizeProvider);
 
+        // ── Determine block cache settings with precedence rules ─────────────────
+        // Global enable/disable takes precedence over per-mount setting.
+        // Per-mount size overrides global size when set.
         // Avoid disk cache overhead for in-memory and local providers.
-        BlockCache? blockCache = normalizedOpts.Provider is "memory" or "local"
-            ? null
-            : new BlockCache(providerId: $"{normalizedOpts.Provider}_{pr.Root.Id}");
+        BlockCache? blockCache = null;
+        if (normalizedOpts.Provider is not ("memory" or "local"))
+        {
+            // Determine if block cache should be enabled
+            bool blockCacheEnabled = normalizedOpts.EnableBlockCache ?? 
+                _appSettings.EnableBlockCache;
+
+            if (blockCacheEnabled)
+            {
+                // Determine block cache size: per-mount overrides global
+                long blockCacheSize = normalizedOpts.BlockCacheSizeBytes ?? 
+                    _appSettings.DefaultBlockCacheSizeBytes;
+
+                blockCache = new BlockCache(
+                    providerId: $"{normalizedOpts.Provider}_{pr.Root.Id}",
+                    blockSize: (int)blockCacheSize);
+            }
+        }
 
         string resolvedLabel = normalizedOpts.Label ?? DefaultLabel(normalizedOpts.Provider, normalizedOpts.Letter);
 
@@ -701,6 +721,85 @@ public sealed class MountService : IDisposable
         catch
         {
             // best-effort persistence
+        }
+    }
+
+    public void ExportConfigurationToFile(string destinationPath)
+    {
+        try
+        {
+            MountConfigurationState state;
+            _stateSemaphore.Wait();
+            try
+            {
+                state = new MountConfigurationState
+                {
+                    SaveMountPointConfigurations = SaveMountPointConfigurations,
+                    PersistMemoryFileSystemOnExit = PersistMemoryFileSystemOnExit,
+                    MemoryFileSystemPersistPath = MemoryFileSystemPersistPath,
+                    MountPoints = [.. _mountConfigurations.Values],
+                };
+            }
+            finally
+            {
+                _stateSemaphore.Release();
+            }
+
+            string json = JsonSerializer.Serialize(state, JsonOptions);
+            string? dir = Path.GetDirectoryName(destinationPath);
+            if (!string.IsNullOrWhiteSpace(dir))
+                Directory.CreateDirectory(dir);
+
+            File.WriteAllText(destinationPath, json);
+        }
+        catch
+        {
+            // best-effort export
+        }
+    }
+
+    public void ImportConfigurationFromFile(string sourcePath, bool importMountPoints = true, bool importSettings = true)
+    {
+        try
+        {
+            if (!File.Exists(sourcePath))
+                return;
+
+            string json = File.ReadAllText(sourcePath);
+            MountConfigurationState? state = JsonSerializer.Deserialize<MountConfigurationState>(json, JsonOptions);
+            if (state is null)
+                return;
+
+            _stateSemaphore.Wait();
+            try
+            {
+                if (importSettings)
+                {
+                    SaveMountPointConfigurations = state.SaveMountPointConfigurations;
+                    PersistMemoryFileSystemOnExit = state.PersistMemoryFileSystemOnExit;
+                    MemoryFileSystemPersistPath = NormalizePersistPath(state.MemoryFileSystemPersistPath);
+                }
+
+                if (importMountPoints && state.MountPoints.Count > 0)
+                {
+                    _mountConfigurations.Clear();
+                    foreach (var mountPoint in state.MountPoints)
+                    {
+                        string letter = mountPoint.Letter.TrimEnd(':').ToUpperInvariant();
+                        _mountConfigurations[letter] = mountPoint;
+                    }
+                }
+            }
+            finally
+            {
+                _stateSemaphore.Release();
+            }
+
+            PersistConfigurationState();
+        }
+        catch
+        {
+            // best-effort import
         }
     }
 }

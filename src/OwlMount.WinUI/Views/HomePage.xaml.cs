@@ -159,10 +159,18 @@ public sealed partial class HomePage : Page
                 MenuFlyoutItem { Text: "Disable" }    => (hasMixed || allDisabled) ? Visibility.Collapsed : Visibility.Visible,
                 MenuFlyoutItem { Text: "Browse" }     => hasAnyDisabled ? Visibility.Collapsed : Visibility.Visible,
                 MenuFlyoutItem { Text: "Unmount" }    => allDisabled ? Visibility.Collapsed : Visibility.Visible,
-                MenuFlyoutSeparator                   => multiSelect ? Visibility.Collapsed : Visibility.Visible,
                 MenuFlyoutItem { Text: "Properties" } => (multiSelect || allDisabled) ? Visibility.Collapsed : Visibility.Visible,
                 _                                     => item.Visibility,
             };
+        }
+
+        // Hide separator if Properties is hidden
+        if (flyout.Items.FirstOrDefault(i => i is MenuFlyoutItem { Text: "Properties" }) is MenuFlyoutItem propertiesItem)
+        {
+            if (flyout.Items.FirstOrDefault(i => i is MenuFlyoutSeparator { Name: "PropertiesSeparator" }) is MenuFlyoutSeparator separator)
+            {
+                separator.Visibility = propertiesItem.Visibility;
+            }
         }
 
         flyout.ShowAt(card, e.GetPosition(card));
@@ -232,6 +240,16 @@ public sealed partial class HomePage : Page
                 NativeMethods.SHObjectProperties(nint.Zero, NativeMethods.SHOP_FILEPATH, $"{letter}:\\", null);
             }
             catch { /* best-effort */ }
+        }
+    }
+
+    public void ToggleStatusMessageVisibility()
+    {
+        if (StatusMessageTextBlock != null)
+        {
+            StatusMessageTextBlock.Visibility = StatusMessageTextBlock.Visibility == Visibility.Visible
+                ? Visibility.Collapsed
+                : Visibility.Visible;
         }
     }
 }

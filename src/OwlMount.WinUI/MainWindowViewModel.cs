@@ -138,7 +138,7 @@ public partial class MainWindowViewModel : ObservableObject
                 m.Provider,
                 GetProviderDisplayName(m.Provider),
                 state,
-                GetDriveCapacityText(m.DriveLetter),
+                GetDriveCapacityBytes(m.DriveLetter),
                 isEnabled: true));
         }
 
@@ -154,7 +154,7 @@ public partial class MainWindowViewModel : ObservableObject
                     config.Provider,
                     GetProviderDisplayName(config.Provider),
                     "Disabled",
-                    string.Empty,
+                    0,
                     isEnabled: false));
             }
         }
@@ -531,6 +531,23 @@ public partial class MainWindowViewModel : ObservableObject
             SetStatus($"Mounted {successCount} drive(s); failures: {string.Join(" | ", failures)}");
 
         _ = _log.InfoAsync($"Mount attempt complete. Success={successCount}, Failures={failures.Count}.");
+    }
+
+    private static long GetDriveCapacityBytes(string driveLetter)
+    {
+        try
+        {
+            string root = $"{driveLetter.TrimEnd(':')}:\\";
+            var info = new DriveInfo(root);
+            if (!info.IsReady)
+                return 0;
+
+            return info.TotalSize;
+        }
+        catch
+        {
+            return 0;
+        }
     }
 
     private static string GetDriveCapacityText(string driveLetter)

@@ -55,7 +55,7 @@
                                 <SymbolIcon Symbol="Delete" />
                             </MenuFlyoutItem.Icon>
                         </MenuFlyoutItem>
-                        <MenuFlyoutSeparator />
+                        <MenuFlyoutSeparator x:Name="PropertiesSeparator" />
                         <MenuFlyoutItem Click="PropertiesFlyoutItem_Click" Text="Properties">
                             <MenuFlyoutItem.Icon>
                                 <FontIcon Glyph="&#xE946;" />
@@ -67,8 +67,8 @@
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="Auto" />
-                        <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
@@ -82,41 +82,43 @@
                         Grid.Column="1"
                         VerticalAlignment="Center"
                         Orientation="Horizontal"
-                        Spacing="6">
+                        Spacing="8">
                         <SymbolIcon Symbol="SaveLocal" />
                         <TextBlock FontWeight="SemiBold" Text="{x:Bind DriveLetter}" />
                     </StackPanel>
-                    <Border
-                        Grid.Column="2"
-                        Padding="6,2"
-                        VerticalAlignment="Center"
-                        Background="{x:Bind IsEnabled, Converter={StaticResource BoolToStatusColorConverter}}"
-                        CornerRadius="4">
-                        <StackPanel Orientation="Horizontal" Spacing="4">
-                            <Ellipse
-                                Width="6"
-                                Height="6"
-                                Fill="White" />
-                            <TextBlock
-                                FontSize="11"
-                                FontWeight="SemiBold"
-                                Foreground="White"
-                                Text="{x:Bind IsEnabled, Converter={StaticResource BoolToStatusTextConverter}}" />
-                        </StackPanel>
-                    </Border>
                     <TextBlock
-                        Grid.Column="3"
+                        Grid.Column="2"
                         MinWidth="120"
                         VerticalAlignment="Center"
                         FontWeight="SemiBold"
                         Text="{x:Bind Label}"
                         TextTrimming="CharacterEllipsis"
                         TextWrapping="NoWrap" />
+                    <Border
+                        Grid.Column="3"
+                        Padding="6,2"
+                        VerticalAlignment="Center"
+                        Background="{ThemeResource LayerFillColorAltBrush}"
+                        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                        BorderThickness="1"
+                        CornerRadius="4">
+                        <StackPanel Orientation="Horizontal" Spacing="4">
+                            <Ellipse
+                                Width="6"
+                                Height="6"
+                                Fill="{x:Bind IsEnabled, Converter={StaticResource BoolToStatusColorConverter}}" />
+                            <TextBlock
+                                FontSize="11"
+                                FontWeight="SemiBold"
+                                Foreground="{x:Bind IsEnabled, Converter={StaticResource BoolToStatusColorConverter}}"
+                                Text="{x:Bind IsEnabled, Converter={StaticResource BoolToStatusTextConverter}}" />
+                        </StackPanel>
+                    </Border>
                     <TextBlock
                         Grid.Column="4"
                         VerticalAlignment="Center"
                         Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                        Text="{x:Bind Capacity}" />
+                        Text="{x:Bind CapacityDisplay}" />
                     <TextBlock
                         Grid.Column="5"
                         VerticalAlignment="Center"
@@ -177,6 +179,7 @@
 
             <ListView.Footer>
                 <TextBlock
+                    x:Name="StatusMessageTextBlock"
                     Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                     Text="{x:Bind ViewModel.StatusMessage, Mode=OneWay}"
                     TextWrapping="Wrap" />
