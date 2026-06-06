@@ -44,13 +44,19 @@ public sealed partial class HomePage : Page
     {
         var app = (App)Application.Current;
         var window = (MainWindow)app.Services.GetRequiredService<MainWindow>();
-        ProviderOptions existing = new()
+        var mountService = app.Services.GetRequiredService<MountService>();
+        string letter = selected.DriveLetter.TrimEnd(':');
+        ProviderOptions? existing = mountService.MountConfigurations.FirstOrDefault(config =>
+            config.Letter.TrimEnd(':').Equals(letter, StringComparison.OrdinalIgnoreCase));
+
+        existing ??= new ProviderOptions
         {
             Provider = selected.Provider,
             Backend = "winfsp",
             Letter = selected.DriveLetter,
             Label = selected.Label,
         };
+
         return await MountConfigDialog.ShowAsync(window, existing);
     }
 

@@ -31,7 +31,7 @@
                     <controls:SettingsCard Header="Label">
                         <TextBox
                             x:Name="LabelBox"
-                            Width="280"
+                            MaxWidth="320"
                             PlaceholderText="Optional, defaults to drive letter" />
                     </controls:SettingsCard>
                 </controls:SettingsExpander.Items>
@@ -41,7 +41,7 @@
                 x:Name="MemorySection"
                 Description="Configure the in-memory drive capacity."
                 Header="Memory"
-                IsExpanded="False"
+                IsExpanded="True"
                 Visibility="Collapsed">
                 <controls:SettingsExpander.Items>
                     <controls:SettingsCard
@@ -67,7 +67,7 @@
                 x:Name="LocalArchiveSection"
                 Description="Path-based mounts and archive files."
                 Header="Local and archive"
-                IsExpanded="False">
+                IsExpanded="True">
                 <controls:SettingsExpander.Items>
                     <controls:SettingsCard
                         Description="Used for the local provider."
@@ -81,6 +81,7 @@
                                 x:Name="PathBox"
                                 Grid.Column="0"
                                 IsReadOnly="True"
+                                MaxWidth="320"
                                 PlaceholderText="Select a folder" />
                             <Button
                                 Grid.Column="1"
@@ -100,6 +101,7 @@
                                 x:Name="ArchiveBox"
                                 Grid.Column="0"
                                 IsReadOnly="True"
+                                MaxWidth="320"
                                 PlaceholderText="Select an archive file" />
                             <Button
                                 Grid.Column="1"
@@ -114,24 +116,24 @@
                 x:Name="KuboSection"
                 Description="API and content-addressed mount options."
                 Header="Kubo"
-                IsExpanded="False">
+                IsExpanded="True">
                 <controls:SettingsExpander.Items>
                     <controls:SettingsCard Header="API URL">
                         <TextBox
                             x:Name="ApiUrlBox"
-                            Width="360"
+                            MaxWidth="320"
                             PlaceholderText="API URL" />
                     </controls:SettingsCard>
                     <controls:SettingsCard Header="CID">
                         <TextBox
                             x:Name="CidBox"
-                            Width="360"
+                            MaxWidth="320"
                             PlaceholderText="CID" />
                     </controls:SettingsCard>
                     <controls:SettingsCard Header="IPNS">
                         <TextBox
                             x:Name="IpnsBox"
-                            Width="360"
+                            MaxWidth="320"
                             PlaceholderText="IPNS" />
                     </controls:SettingsCard>
                 </controls:SettingsExpander.Items>
@@ -141,39 +143,39 @@
                 x:Name="S3Section"
                 Description="Cloud bucket settings."
                 Header="Amazon S3"
-                IsExpanded="False">
+                IsExpanded="True">
                 <controls:SettingsExpander.Items>
                     <controls:SettingsCard Header="Bucket">
                         <TextBox
                             x:Name="BucketBox"
-                            Width="360"
+                            MaxWidth="320"
                             PlaceholderText="Bucket" />
                     </controls:SettingsCard>
                     <controls:SettingsCard Header="Prefix">
                         <TextBox
                             x:Name="PrefixBox"
-                            Width="360"
+                            MaxWidth="320"
                             PlaceholderText="Prefix" />
                     </controls:SettingsCard>
                     <controls:SettingsCard Header="Access key">
                         <TextBox
                             x:Name="AccessKeyBox"
-                            Width="360"
+                            MaxWidth="320"
                             PlaceholderText="Access key" />
                     </controls:SettingsCard>
                     <controls:SettingsCard Header="Secret key">
-                        <PasswordBox x:Name="SecretKeyBox" Width="360" />
+                        <PasswordBox x:Name="SecretKeyBox" MaxWidth="320" />
                     </controls:SettingsCard>
                     <controls:SettingsCard Header="Region">
                         <TextBox
                             x:Name="RegionBox"
-                            Width="360"
+                            MaxWidth="320"
                             PlaceholderText="Region" />
                     </controls:SettingsCard>
                     <controls:SettingsCard Header="Endpoint">
                         <TextBox
                             x:Name="EndpointBox"
-                            Width="360"
+                            MaxWidth="320"
                             PlaceholderText="Endpoint" />
                     </controls:SettingsCard>
                 </controls:SettingsExpander.Items>
@@ -183,24 +185,24 @@
                 x:Name="NfsSection"
                 Description="Network file system settings."
                 Header="NFS"
-                IsExpanded="False">
+                IsExpanded="True">
                 <controls:SettingsExpander.Items>
                     <controls:SettingsCard Header="Host">
                         <TextBox
                             x:Name="NfsHostBox"
-                            Width="360"
+                            MaxWidth="320"
                             PlaceholderText="Host" />
                     </controls:SettingsCard>
                     <controls:SettingsCard Header="Export">
                         <TextBox
                             x:Name="NfsExportBox"
-                            Width="360"
+                            MaxWidth="320"
                             PlaceholderText="Export" />
                     </controls:SettingsCard>
                     <controls:SettingsCard Header="Path">
                         <TextBox
                             x:Name="NfsPathBox"
-                            Width="360"
+                            MaxWidth="320"
                             PlaceholderText="/path" />
                     </controls:SettingsCard>
                 </controls:SettingsExpander.Items>
@@ -210,7 +212,7 @@
                 x:Name="BlockCacheSection"
                 Description="Configure block cache for this mount (leave empty to use global settings)."
                 Header="Block cache"
-                IsExpanded="False">
+                IsExpanded="True">
                 <controls:SettingsExpander.Items>
                     <controls:SettingsCard Header="Enable block cache">
                         <ComboBox
