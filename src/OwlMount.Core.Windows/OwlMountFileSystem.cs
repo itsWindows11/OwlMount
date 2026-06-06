@@ -166,42 +166,49 @@ public sealed class OwlMountFileSystem : FileSystemBase
         fileInfo = default;
         normalizedName = null;
 
-        if (IsRoot(fileName))
+        try
         {
-            EnsureFolderWatcher(_root, string.Empty);
-            fileNode = new FolderContext(_root, string.Empty);
-            FillFolderInfo(ref fileInfo);
+            if (IsRoot(fileName))
+            {
+                EnsureFolderWatcher(_root, string.Empty);
+                fileNode = new FolderContext(_root, string.Empty);
+                FillFolderInfo(ref fileInfo);
+                return STATUS_SUCCESS;
+            }
+
+            string norm = PathIndex.Normalize(fileName);
+            PathIndexEntry? entry = _index.TryGet(norm) ?? ResolveAndIndex(norm);
+            if (entry is null) return STATUS_OBJECT_NAME_NOT_FOUND;
+
+            if (entry.IsFile)
+            {
+                IFile? file = ResolveFile(norm);
+                if (file is null) return STATUS_OBJECT_NAME_NOT_FOUND;
+
+                // Populate size on first open if still unknown
+                if (!entry.Size.HasValue)
+                    entry.Size = _sizeProviders.GetProvider(file)
+                        .GetSizeAsync(file).GetAwaiter().GetResult();
+
+                fileNode = new FileContext(file, entry, norm);
+                FillFileInfo(entry, ref fileInfo);
+            }
+            else
+            {
+                IFolder? folder = ResolveFolder(norm);
+                if (folder is null) return STATUS_OBJECT_NAME_NOT_FOUND;
+                EnsureFolderWatcher(folder, norm);
+                _folderObjects.TryAdd(norm, folder);
+                fileNode = new FolderContext(folder, norm);
+                FillFolderInfo(ref fileInfo, entry);
+            }
+
             return STATUS_SUCCESS;
         }
-
-        string norm = PathIndex.Normalize(fileName);
-        PathIndexEntry? entry = _index.TryGet(norm) ?? ResolveAndIndex(norm);
-        if (entry is null) return STATUS_OBJECT_NAME_NOT_FOUND;
-
-        if (entry.IsFile)
+        catch (Exception ex)
         {
-            IFile? file = ResolveFile(norm);
-            if (file is null) return STATUS_OBJECT_NAME_NOT_FOUND;
-
-            // Populate size on first open if still unknown
-            if (!entry.Size.HasValue)
-                entry.Size = _sizeProviders.GetProvider(file)
-                    .GetSizeAsync(file).GetAwaiter().GetResult();
-
-            fileNode = new FileContext(file, entry, norm);
-            FillFileInfo(entry, ref fileInfo);
+            return HandleReadFailure("open", fileName, ex, STATUS_UNEXPECTED_IO_ERROR);
         }
-        else
-        {
-            IFolder? folder = ResolveFolder(norm);
-            if (folder is null) return STATUS_OBJECT_NAME_NOT_FOUND;
-            EnsureFolderWatcher(folder, norm);
-            _folderObjects.TryAdd(norm, folder);
-            fileNode = new FolderContext(folder, norm);
-            FillFolderInfo(ref fileInfo, entry);
-        }
-
-        return STATUS_SUCCESS;
     }
 
     public override void Close(object fileNode, object fileDesc)
@@ -223,26 +230,33 @@ public sealed class OwlMountFileSystem : FileSystemBase
         bytesTransferred = 0;
         if (fileNode is not FileContext ctx) return STATUS_INVALID_DEVICE_REQUEST;
 
-        byte[] tmp = new byte[length];
-        IRangeReader reader = _rangeReaders.GetReader(ctx.File);
-
-        int read;
-        if (_blockCache is not null)
+        try
         {
-            read = _blockCache
-                .ReadAsync(ctx.File, reader, (long)offset, tmp.AsMemory(0, (int)length))
-                .GetAwaiter().GetResult();
+            byte[] tmp = new byte[length];
+            IRangeReader reader = _rangeReaders.GetReader(ctx.File);
+
+            int read;
+            if (_blockCache is not null)
+            {
+                read = _blockCache
+                    .ReadAsync(ctx.File, reader, (long)offset, tmp.AsMemory(0, (int)length))
+                    .GetAwaiter().GetResult();
+            }
+            else
+            {
+                read = reader.ReadAsync(ctx.File, (long)offset, tmp.AsMemory(0, (int)length)).GetAwaiter().GetResult();
+            }
+
+            if (read > 0)
+                Marshal.Copy(tmp, 0, buffer, read);
+
+            bytesTransferred = (uint)read;
+            return STATUS_SUCCESS;
         }
-        else
+        catch (Exception ex)
         {
-            read = reader.ReadAsync(ctx.File, (long)offset, tmp.AsMemory(0, (int)length)).GetAwaiter().GetResult();
+            return HandleReadFailure("read", ctx.NormalizedPath, ex, STATUS_UNEXPECTED_IO_ERROR);
         }
-
-        if (read > 0)
-            Marshal.Copy(tmp, 0, buffer, read);
-
-        bytesTransferred = (uint)read;
-        return STATUS_SUCCESS;
     }
 
     // ── File / directory info ─────────────────────────────────────────────────
@@ -250,22 +264,36 @@ public sealed class OwlMountFileSystem : FileSystemBase
     public override int GetFileInfo(object fileNode, object fileDesc, out FileInfo fileInfo)
     {
         fileInfo = default;
-        switch (fileNode)
-        {
-            case FileContext fc:
-                FillFileInfo(fc.Entry, ref fileInfo);
-                break;
-            case FolderContext dc:
-                PathIndexEntry? entry = string.IsNullOrEmpty(dc.NormalizedPath)
-                    ? null
-                    : _index.TryGet(dc.NormalizedPath) ?? ResolveAndIndex(dc.NormalizedPath);
-                FillFolderInfo(ref fileInfo, entry);
-                break;
-            default:
-                return STATUS_INVALID_DEVICE_REQUEST;
-        }
 
-        return STATUS_SUCCESS;
+        try
+        {
+            switch (fileNode)
+            {
+                case FileContext fc:
+                    FillFileInfo(fc.Entry, ref fileInfo);
+                    break;
+                case FolderContext dc:
+                    PathIndexEntry? entry = string.IsNullOrEmpty(dc.NormalizedPath)
+                        ? null
+                        : _index.TryGet(dc.NormalizedPath) ?? ResolveAndIndex(dc.NormalizedPath);
+                    FillFolderInfo(ref fileInfo, entry);
+                    break;
+                default:
+                    return STATUS_INVALID_DEVICE_REQUEST;
+            }
+
+            return STATUS_SUCCESS;
+        }
+        catch (Exception ex)
+        {
+            string path = fileNode switch
+            {
+                FileContext fc => fc.NormalizedPath,
+                FolderContext dc => dc.NormalizedPath,
+                _ => string.Empty,
+            };
+            return HandleReadFailure("get-file-info", path, ex, STATUS_UNEXPECTED_IO_ERROR);
+        }
     }
 
     // ── Directory enumeration ─────────────────────────────────────────────────
@@ -289,32 +317,40 @@ public sealed class OwlMountFileSystem : FileSystemBase
 
         if (fileNode is not FolderContext folderCtx) return false;
 
-        IReadOnlyList<DirectoryEntry> entries = GetOrPopulateDirectory(folderCtx);
-        int idx = context is int i ? i : 0;
-
-        if (context is null && marker is not null)
+        try
         {
-            while (idx < entries.Count &&
-                   string.Compare(entries[idx].Name, marker, StringComparison.OrdinalIgnoreCase) <= 0)
+            IReadOnlyList<DirectoryEntry> entries = GetOrPopulateDirectory(folderCtx);
+            int idx = context is int i ? i : 0;
+
+            if (context is null && marker is not null)
             {
-                idx++;
+                while (idx < entries.Count &&
+                       string.Compare(entries[idx].Name, marker, StringComparison.OrdinalIgnoreCase) <= 0)
+                {
+                    idx++;
+                }
             }
-        }
 
-        while (idx < entries.Count)
+            while (idx < entries.Count)
+            {
+                DirectoryEntry entry = entries[idx++];
+
+                if (pattern is not null && !WildcardMatch(pattern, entry.Name))
+                    continue;
+
+                fileName = entry.Name;
+                FillEntryInfo(entry, ref fileInfo);
+                context = idx;
+                return true;
+            }
+
+            return false;
+        }
+        catch (Exception ex)
         {
-            DirectoryEntry entry = entries[idx++];
-
-            if (pattern is not null && !WildcardMatch(pattern, entry.Name))
-                continue;
-
-            fileName = entry.Name;
-            FillEntryInfo(entry, ref fileInfo);
-            context = idx;
-            return true;
+            LogWriteFailure("read-directory", folderCtx.NormalizedPath, ex, STATUS_UNEXPECTED_IO_ERROR);
+            return false;
         }
-
-        return false;
     }
 
     // ── Write operations: all denied (read-only filesystem) ───────────────────
@@ -760,6 +796,13 @@ public sealed class OwlMountFileSystem : FileSystemBase
         return status;
     }
 
+    private int HandleReadFailure(string operation, string path, Exception exception, int fallbackStatus)
+    {
+        int status = MapWriteException(exception, fallbackStatus);
+        LogWriteFailure(operation, path, exception, status);
+        return status;
+    }
+
     private int MapWriteException(Exception exception, int fallbackStatus)
     {
         return exception switch
@@ -776,7 +819,7 @@ public sealed class OwlMountFileSystem : FileSystemBase
         };
     }
 
-    private int MapIOException(IOException exception, int fallbackStatus)
+    private static int MapIOException(IOException exception, int fallbackStatus)
     {
         const int ErrorFileNotFound = 2;
         const int ErrorPathNotFound = 3;
