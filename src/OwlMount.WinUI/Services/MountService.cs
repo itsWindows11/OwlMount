@@ -133,9 +133,9 @@ public sealed class MountService : IDisposable
         // ── Determine block cache settings with precedence rules ─────────────────
         // Global enable/disable takes precedence over per-mount setting.
         // Per-mount size overrides global size when set.
-        // Avoid disk cache overhead for in-memory and local providers.
+        // Avoid disk cache overhead for in-memory, archive, and local providers.
         BlockCache? blockCache = null;
-        if (normalizedOpts.Provider is not ("memory" or "local"))
+        if (normalizedOpts.Provider is not ("memory" or "archive" or "local"))
         {
             // Determine if block cache should be enabled
             bool blockCacheEnabled = normalizedOpts.EnableBlockCache ?? 

@@ -1,6 +1,6 @@
 {
   "profiles": {
-    "OwlMount.WinFspHost": {
+    "OwlMount.CLI": {
       "commandName": "Project",
       "commandLineArgs": "mount --provider memory --letter R"
     }

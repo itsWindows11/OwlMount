@@ -7,7 +7,7 @@
     <Nullable>enable</Nullable>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <AssemblyName>owlmount</AssemblyName>
-    <RootNamespace>OwlMount.WinFspHost</RootNamespace>
+    <RootNamespace>OwlMount.CLI</RootNamespace>
   </PropertyGroup>
 
   <ItemGroup>

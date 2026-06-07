@@ -330,10 +330,10 @@ static partial class Program
         // ── Build the VFS components ──────────────────────────────────────────
         var rangeReaders  = new RangeReaderRegistry();
         var sizeProviders = new SizeProviderRegistry();
-        // For in-memory and local filesystem providers we don't need a disk-backed
+        // For in-memory, archive, and local filesystem providers we don't need a disk-backed
         // block cache — read directly from the provider. Create a cache only for
         // providers that may benefit from on-disk caching.
-        BlockCache? blockCache = (provider == "memory" || provider == "local")
+        BlockCache? blockCache = (provider == "memory" || provider == "archive" || provider == "local")
             ? null
             : new BlockCache(providerId: $"{provider}_{root.Id}");
 
