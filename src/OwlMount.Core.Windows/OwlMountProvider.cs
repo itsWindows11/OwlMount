@@ -331,9 +331,9 @@ public sealed class OwlMountProvider : IRequiredCallbacks
             byteOffset, length,
             out ulong alignedByteOffset, out uint alignedLength);
 
+        byte[] tmp = System.Buffers.ArrayPool<byte>.Shared.Rent((int)alignedLength);
         try
         {
-            byte[] tmp = new byte[alignedLength];
             int read;
             if (_blockCache is not null)
             {
@@ -353,6 +353,7 @@ public sealed class OwlMountProvider : IRequiredCallbacks
         }
         finally
         {
+            System.Buffers.ArrayPool<byte>.Shared.Return(tmp);
             (writeBuffer as IDisposable)?.Dispose();
         }
     }

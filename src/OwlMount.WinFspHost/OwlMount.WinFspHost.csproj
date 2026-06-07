@@ -15,7 +15,7 @@
     <ProjectReference Include="..\..\src\OwlMount.Core.Windows\OwlMount.Core.Windows.csproj" />
     <PackageReference Include="OwlCore.Storage" Version="0.15.0" />
     <!-- Cloud / network providers -->
-    <PackageReference Include="OwlCore.Kubo" Version="0.21.0" />
+    <PackageReference Include="OwlCore.Kubo" Version="0.22.4" />
     <PackageReference Include="OwlCore.Storage.OneDrive" Version="0.3.0" />
     <PackageReference Include="OwlCore.Storage.AmazonS3" Version="0.1.1" />
     <PackageReference Include="OwlCore.Storage.NfsSharp" Version="0.1.0" />
