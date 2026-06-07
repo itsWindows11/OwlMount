@@ -40,7 +40,7 @@ internal sealed class ProviderCreationResult
 internal static class ProviderFactory
 {
     public static async Task<ProviderCreationResult> CreateAsync(
-        ProviderOptions opts, CancellationToken ct = default)
+        ProviderOptions opts, IFolder? existingRoot = null, CancellationToken ct = default)
     {
         ulong? totalSize = null;
         ulong? freeSize = null;
@@ -55,7 +55,7 @@ internal static class ProviderFactory
         {
             // ── memory ─────────────────────────────────────────────────────────
             case "memory":
-                root = new MemoryFolder(id: "memory-root", name: "memory-root");
+                root = existingRoot ?? new MemoryFolder(id: "memory-root", name: "memory-root");
                 (totalSize, freeSize) = GetMemoryVolumeSpace(opts.MemorySizeLimitBytes);
                 break;
 

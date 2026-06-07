@@ -21,6 +21,7 @@ public sealed class MountService : IDisposable
     private readonly Dictionary<string, ProviderOptions> _mountConfigurations =
         new(StringComparer.OrdinalIgnoreCase);
     private readonly AppSettingsService _appSettings;
+    private readonly Dictionary<string, IFolder> _memoryRoots = new(StringComparer.OrdinalIgnoreCase);
 
     private readonly SemaphoreSlim _stateSemaphore = new(1, 1);
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
@@ -101,7 +102,21 @@ public sealed class MountService : IDisposable
         ProviderCreationResult pr;
         try
         {
-            pr = await ProviderFactory.CreateAsync(normalizedOpts, ct);
+            IFolder? existingRoot = null;
+            if (normalizedOpts.Provider.Equals("memory", StringComparison.OrdinalIgnoreCase))
+            {
+                _stateSemaphore.Wait(ct);
+                try
+                {
+                    _memoryRoots.TryGetValue(letter, out existingRoot);
+                }
+                finally
+                {
+                    _stateSemaphore.Release();
+                }
+            }
+
+            pr = await ProviderFactory.CreateAsync(normalizedOpts, existingRoot, ct);
         }
         catch (Exception ex)
         {
@@ -223,6 +238,8 @@ public sealed class MountService : IDisposable
         {
             _mounts[letter] = mount;
             _mountConfigurations[letter] = normalizedOpts;
+            if (normalizedOpts.Provider.Equals("memory", StringComparison.OrdinalIgnoreCase))
+                _memoryRoots[letter] = pr.Root;
         }
         finally
         {
@@ -244,12 +261,21 @@ public sealed class MountService : IDisposable
             if (!_mounts.Remove(letter, out mount))
                 return;
             _mountConfigurations.Remove(letter);
+            // Preserve the in-memory root so a later re-enable reuses the same data.
+            if (mount.Provider.Equals("memory", StringComparison.OrdinalIgnoreCase))
+                _memoryRoots[letter] = mount.RootFolder;
         }
         finally
         {
             _stateSemaphore.Release();
         }
         StopMount(mount);
+        if (mount is not null && mount.Provider.Equals("memory", StringComparison.OrdinalIgnoreCase))
+        {
+            _stateSemaphore.Wait();
+            try { _memoryRoots[letter] = mount.RootFolder; }
+            finally { _stateSemaphore.Release(); }
+        }
         MountsChanged?.Invoke(this, EventArgs.Empty);
         PersistConfigurationState();
     }
@@ -268,6 +294,8 @@ public sealed class MountService : IDisposable
             // Remove from active mounts but leave _mountConfigurations intact.
             if (!_mounts.Remove(letter, out mount))
                 return;
+            if (mount.Provider.Equals("memory", StringComparison.OrdinalIgnoreCase))
+                _memoryRoots[letter] = mount.RootFolder;
         }
         finally
         {
@@ -287,7 +315,14 @@ public sealed class MountService : IDisposable
         {
             mounts = [.. _mounts.Values];
             foreach (string letter in _mounts.Keys.ToArray())
+            {
+                if (_mounts.TryGetValue(letter, out ActiveMount? active) &&
+                    active.Provider.Equals("memory", StringComparison.OrdinalIgnoreCase))
+                {
+                    _memoryRoots[letter] = active.RootFolder;
+                }
                 _mountConfigurations.Remove(letter);
+            }
             _mounts.Clear();
         }
         finally
