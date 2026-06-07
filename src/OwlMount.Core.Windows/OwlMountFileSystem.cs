@@ -6,6 +6,7 @@ using System.Runtime.Versioning;
 using Fsp;
 using Fsp.Interop;
 using OwlCore.Storage;
+using OwlCore.Storage.Memory;
 using OwlMount.Core.Abstractions;
 using OwlMount.Core.Cache;
 using OwlMount.Core.Index;
@@ -122,7 +123,15 @@ public sealed class OwlMountFileSystem : FileSystemBase
     {
         volumeInfo = default;
         volumeInfo.TotalSize = _totalSize;
-        volumeInfo.FreeSize = _freeSize;
+        if (_root is MemoryFolder)
+        {
+            ulong usedBytes = _index.GetTotalFileBytes();
+            volumeInfo.FreeSize = usedBytes >= _totalSize ? 0 : _totalSize - usedBytes;
+        }
+        else
+        {
+            volumeInfo.FreeSize = _freeSize;
+        }
         volumeInfo.SetVolumeLabel(_volumeLabel);
         return STATUS_SUCCESS;
     }
@@ -230,9 +239,9 @@ public sealed class OwlMountFileSystem : FileSystemBase
         bytesTransferred = 0;
         if (fileNode is not FileContext ctx) return STATUS_INVALID_DEVICE_REQUEST;
 
+        byte[] tmp = System.Buffers.ArrayPool<byte>.Shared.Rent((int)length);
         try
         {
-            byte[] tmp = new byte[length];
             IRangeReader reader = _rangeReaders.GetReader(ctx.File);
 
             int read;
@@ -256,6 +265,10 @@ public sealed class OwlMountFileSystem : FileSystemBase
         catch (Exception ex)
         {
             return HandleReadFailure("read", ctx.NormalizedPath, ex, STATUS_UNEXPECTED_IO_ERROR);
+        }
+        finally
+        {
+            System.Buffers.ArrayPool<byte>.Shared.Return(tmp);
         }
     }
 
@@ -465,6 +478,7 @@ public sealed class OwlMountFileSystem : FileSystemBase
         if (_isReadOnly) return STATUS_MEDIA_WRITE_PROTECTED;
         if (fileNode is not FileContext ctx) return STATUS_FILE_IS_A_DIRECTORY;
 
+        byte[] tmp = System.Buffers.ArrayPool<byte>.Shared.Rent((int)length);
         try
         {
             Stream stream = ctx.GetOrOpenWriteStream();
@@ -477,7 +491,6 @@ public sealed class OwlMountFileSystem : FileSystemBase
             if (stream.CanSeek)
                 stream.Seek((long)offset, SeekOrigin.Begin);
 
-            byte[] tmp = new byte[length];
             Marshal.Copy(buffer, tmp, 0, (int)length);
             stream.Write(tmp, 0, (int)length);
             stream.Flush();
@@ -490,6 +503,10 @@ public sealed class OwlMountFileSystem : FileSystemBase
         catch (Exception ex)
         {
             return HandleWriteFailure("write", ctx.NormalizedPath, ex, STATUS_UNEXPECTED_IO_ERROR);
+        }
+        finally
+        {
+            System.Buffers.ArrayPool<byte>.Shared.Return(tmp);
         }
     }
 

@@ -43,6 +43,22 @@ public sealed class PathIndex
     }
 
     /// <summary>
+    /// Calculates the sum of all cached file sizes in the index.
+    /// </summary>
+    public ulong GetTotalFileBytes()
+    {
+        ulong total = 0;
+        foreach (var entry in _entries.Values)
+        {
+            if (entry.IsFile)
+            {
+                total += (ulong)(entry.Size ?? 0L);
+            }
+        }
+        return total;
+    }
+
+    /// <summary>
     /// Normalizes a Windows-style path to a forward-slash-separated path with no
     /// leading or trailing slashes. Examples:
     /// <list type="bullet">

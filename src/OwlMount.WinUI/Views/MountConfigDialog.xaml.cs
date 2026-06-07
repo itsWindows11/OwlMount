@@ -23,9 +23,9 @@ public sealed partial class MountConfigDialog : UserControl
         _window = window;
 
         // Compute free RAM (in MiB) for the memory size slider ceiling.
-        var gcInfo = GC.GetGCMemoryInfo();
-        _maxMemoryMb = gcInfo.TotalAvailableMemoryBytes > 0
-            ? Math.Max(64, (long)(gcInfo.TotalAvailableMemoryBytes / (1024 * 1024)))
+        ulong availBytes = NativeMethods.GetAvailablePhysicalMemory();
+        _maxMemoryMb = availBytes > 0
+            ? Math.Max(64, (long)(availBytes / (1024 * 1024)))
             : 4096;
 
         MemorySizeSlider.Maximum = _maxMemoryMb;
@@ -172,6 +172,7 @@ public sealed partial class MountConfigDialog : UserControl
         KuboSection.Visibility = provider.StartsWith("kubo-", StringComparison.OrdinalIgnoreCase) ? Visibility.Visible : Visibility.Collapsed;
         S3Section.Visibility = provider == "s3" ? Visibility.Visible : Visibility.Collapsed;
         NfsSection.Visibility = provider == "nfs" ? Visibility.Visible : Visibility.Collapsed;
+        BlockCacheSection.Visibility = provider == "memory" ? Visibility.Collapsed : Visibility.Visible;
     }
 
     private void MemorySizeSlider_ValueChanged(object sender, Microsoft.UI.Xaml.Controls.Primitives.RangeBaseValueChangedEventArgs e)
