@@ -41,7 +41,7 @@ jobs:
           dotnet-version: '10.0.x'
 
       - name: Publish self-contained AOT executable
-        run: dotnet publish src/OwlMount.WinFspHost/OwlMount.WinFspHost.csproj -c Release -r win-x64 --self-contained /p:PublishAot=true -o publish
+        run: dotnet publish src/OwlMount.CLI/OwlMount.CLI.csproj -c Release -r win-x64 --self-contained /p:PublishAot=true -o publish
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
