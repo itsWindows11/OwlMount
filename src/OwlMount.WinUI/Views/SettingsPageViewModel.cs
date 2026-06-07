@@ -1,3 +1,5 @@
+using System.Collections.Generic;
+using System.Linq;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Microsoft.UI.Xaml;
@@ -22,6 +24,8 @@ public partial class SettingsPageViewModel : ObservableObject
     private long _defaultBlockCacheSizeBytes;
     private bool _enableBlockCache;
 
+    // BlockSizeOption moved to its own file to be resolvable from XAML.
+
     public IAsyncRelayCommand BrowseExportPathCommand { get; }
     public IAsyncRelayCommand ClearDiskCacheCommand { get; }
     public IAsyncRelayCommand ClearProjFsResidueCommand { get; }
@@ -29,7 +33,7 @@ public partial class SettingsPageViewModel : ObservableObject
     public IAsyncRelayCommand ExportConfigurationCommand { get; }
     public IAsyncRelayCommand ImportConfigurationCommand { get; }
 
-    public IReadOnlyList<ElementTheme> ThemeOptions { get; } = [ElementTheme.Default, ElementTheme.Light, ElementTheme.Dark];
+    public IReadOnlyList<ElementTheme> ThemeOptions { get; } = new[] { ElementTheme.Default, ElementTheme.Light, ElementTheme.Dark };
 
     public bool SaveMountConfigurations
     {
@@ -43,6 +47,8 @@ public partial class SettingsPageViewModel : ObservableObject
             }
         }
     }
+
+    public IReadOnlyList<BlockSizeOption> BlockCacheSizeOptions { get; private set; } = Array.Empty<BlockSizeOption>();
 
     public bool PersistMemoryFsOnExit
     {
@@ -143,6 +149,19 @@ public partial class SettingsPageViewModel : ObservableObject
         _persistMemoryFsOnExit = _mountService.PersistMemoryFileSystemOnExit;
         _persistMemoryFsPath = _mountService.MemoryFileSystemPersistPath;
         _isPersistMemoryFsPathEnabled = _persistMemoryFsOnExit;
+        BlockCacheSizeOptions =
+        [
+            new BlockSizeOption(65536, "64 KiB"),
+            new BlockSizeOption(131072, "128 KiB"),
+            new BlockSizeOption(262144, "256 KiB (default)"),
+            new BlockSizeOption(524288, "512 KiB"),
+            new BlockSizeOption(1048576, "1 MiB"),
+            new BlockSizeOption(2097152, "2 MiB"),
+        ];
+
+        // Ensure selected value matches one of the options; if not, default to 256 KiB
+        if (!BlockCacheSizeOptions.Any(o => o.Bytes == _defaultBlockCacheSizeBytes))
+            DefaultBlockCacheSizeBytes = 262144;
     }
 
     public void SetWindowProvider(Func<Window?> windowProvider) => _windowProvider = windowProvider;
@@ -193,7 +212,7 @@ public partial class SettingsPageViewModel : ObservableObject
             {
                 SuggestedStartLocation = PickerLocationId.DocumentsLibrary,
                 DefaultFileExtension = ".json",
-                FileTypeChoices = { { "JSON Configuration", new[] { ".json" } } }
+                FileTypeChoices = { { "JSON Configuration", [ ".json" ] } }
             };
 
             var window = _windowProvider();

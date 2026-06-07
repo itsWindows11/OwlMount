@@ -7,6 +7,7 @@
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     xmlns:x1="using:System"
+    xmlns:vm="using:OwlMount.WinUI.Views"
     mc:Ignorable="d">
 
     <Page.Resources>
@@ -135,14 +136,14 @@
                             HorizontalAlignment="Right"
                             AutomationProperties.Name="Default block cache size"
                             IsEnabled="{x:Bind ViewModel.EnableBlockCache, Mode=OneWay}"
-                            Loaded="BlockCacheSizeComboBox_Loaded"
-                            SelectionChanged="BlockCacheSizeComboBox_SelectionChanged">
-                            <ComboBoxItem Tag="65536">64 KiB</ComboBoxItem>
-                            <ComboBoxItem Tag="131072">128 KiB</ComboBoxItem>
-                            <ComboBoxItem Tag="262144">256 KiB (default)</ComboBoxItem>
-                            <ComboBoxItem Tag="524288">512 KiB</ComboBoxItem>
-                            <ComboBoxItem Tag="1048576">1 MiB</ComboBoxItem>
-                            <ComboBoxItem Tag="2097152">2 MiB</ComboBoxItem>
+                            ItemsSource="{x:Bind ViewModel.BlockCacheSizeOptions, Mode=OneWay}"
+                            SelectedValue="{x:Bind ViewModel.DefaultBlockCacheSizeBytes, Mode=TwoWay}"
+                            SelectedValuePath="Bytes">
+                            <ComboBox.ItemTemplate>
+                            <DataTemplate x:DataType="vm:BlockSizeOption">
+                                    <TextBlock Text="{x:Bind Display, Mode=OneWay}" />
+                                </DataTemplate>
+                            </ComboBox.ItemTemplate>
                         </ComboBox>
                     </controls:SettingsCard>
                 </controls:SettingsExpander.Items>
