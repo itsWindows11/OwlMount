@@ -6,8 +6,8 @@
     xmlns:converters="using:OwlMount.WinUI.Converters"
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
-    xmlns:x1="using:System"
     xmlns:vm="using:OwlMount.WinUI.Views"
+    xmlns:x1="using:System"
     mc:Ignorable="d">
 
     <Page.Resources>
@@ -140,8 +140,8 @@
                             SelectedValue="{x:Bind ViewModel.DefaultBlockCacheSizeBytes, Mode=TwoWay}"
                             SelectedValuePath="Bytes">
                             <ComboBox.ItemTemplate>
-                            <DataTemplate x:DataType="vm:BlockSizeOption">
-                                    <TextBlock Text="{x:Bind Display, Mode=OneWay}" />
+                                <DataTemplate x:DataType="vm:BlockSizeOption">
+                                    <TextBlock Text="{x:Bind Display}" />
                                 </DataTemplate>
                             </ComboBox.ItemTemplate>
                         </ComboBox>
