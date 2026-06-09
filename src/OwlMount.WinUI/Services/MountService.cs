@@ -229,7 +229,7 @@ public sealed class MountService : IDisposable
             pr.ExtraDisposable?.Dispose();
             string captured = errorBuffer.ToString().Trim();
             return (false, string.IsNullOrWhiteSpace(captured)
-                ? $"Failed to mount {mountPoint}. Ensure the required backend ({normalizedOpts.Backend}) is installed."
+                ? $"Failed to mount {mountPoint}. Ensure the required backend ({selectedBackend}) is installed."
                 : captured);
         }
 

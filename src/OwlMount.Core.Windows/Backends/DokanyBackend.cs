@@ -16,6 +16,8 @@ namespace OwlMount.Core.Windows.Backends;
 [SupportedOSPlatform("windows")]
 public sealed class DokanyBackend : IOwlMountBackend
 {
+    private static readonly string[] DokanyInstallProbeFiles = ["dokan2.dll", "dokan1.dll", "dokanctl.exe"];
+
     private readonly DokanyOperations _operations;
     private DokanInstance? _instance;
     private bool _stopping;
@@ -57,7 +59,7 @@ public sealed class DokanyBackend : IOwlMountBackend
     public static bool IsAvailable()
     {
         string sys32 = Environment.GetFolderPath(Environment.SpecialFolder.System);
-        if (File.Exists(Path.Combine(sys32, "dokan2.dll")) || File.Exists(Path.Combine(sys32, "dokan1.dll")))
+        if (DokanyInstallProbeFiles.Take(2).Any(name => File.Exists(Path.Combine(sys32, name))))
             return true;
 
         static IEnumerable<string> EnumerateDokanInstallRoots(string basePath)
@@ -76,12 +78,7 @@ public sealed class DokanyBackend : IOwlMountBackend
         string pf86 = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86);
         return EnumerateDokanInstallRoots(pf)
             .Concat(EnumerateDokanInstallRoots(pf86))
-            .SelectMany(d => new[]
-            {
-                Path.Combine(d, "dokan2.dll"),
-                Path.Combine(d, "dokan1.dll"),
-                Path.Combine(d, "dokanctl.exe"),
-            })
+            .SelectMany(d => DokanyInstallProbeFiles.Select(name => Path.Combine(d, name)))
             .Any(File.Exists);
     }
 
@@ -170,6 +167,13 @@ public sealed class DokanyBackend : IOwlMountBackend
 [SupportedOSPlatform("windows")]
 internal sealed class DokanyOperations : IDokanOperations
 {
+    private static readonly HashSet<string> WindowsNoiseFiles = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "desktop.ini",
+        "thumbs.db",
+        "autorun.inf",
+    };
+
     private readonly IFolder _root;
     private readonly BlockCache? _blockCache;
     private readonly RangeReaderRegistry _rangeReaders;
@@ -682,9 +686,7 @@ internal sealed class DokanyOperations : IDokanOperations
         }
         catch
         {
-            if (name.Equals("desktop.ini", StringComparison.OrdinalIgnoreCase) ||
-                name.Equals("thumbs.db", StringComparison.OrdinalIgnoreCase) ||
-                name.Equals("autorun.inf", StringComparison.OrdinalIgnoreCase))
+            if (WindowsNoiseFiles.Contains(name))
             {
                 return null;
             }
@@ -714,17 +716,20 @@ internal sealed class DokanyOperations : IDokanOperations
 
     private FileInformation BuildDirectoryInfo(string fileName, IStorable? folder)
     {
-        DateTimeOffset now = DateTimeOffset.UtcNow;
+        DateTime now = DateTime.UtcNow;
         return new FileInformation
         {
             FileName = fileName,
             Attributes = _isReadOnly ? FileAttributes.Directory | FileAttributes.ReadOnly : FileAttributes.Directory,
-            CreationTime = folder is not null ? StorageTimestampHelper.GetCreatedAt(folder)?.UtcDateTime : now.UtcDateTime,
-            LastAccessTime = folder is not null ? StorageTimestampHelper.GetLastAccessedAt(folder)?.UtcDateTime : now.UtcDateTime,
-            LastWriteTime = folder is not null ? StorageTimestampHelper.GetLastModifiedAt(folder)?.UtcDateTime : now.UtcDateTime,
+            CreationTime = folder is not null ? TimestampOrNow(StorageTimestampHelper.GetCreatedAt(folder), now) : now,
+            LastAccessTime = folder is not null ? TimestampOrNow(StorageTimestampHelper.GetLastAccessedAt(folder), now) : now,
+            LastWriteTime = folder is not null ? TimestampOrNow(StorageTimestampHelper.GetLastModifiedAt(folder), now) : now,
             Length = 0,
         };
     }
+
+    private static DateTime TimestampOrNow(DateTimeOffset? value, DateTime fallbackUtc) =>
+        value?.UtcDateTime ?? fallbackUtc;
 
     private static Stream OpenWriteStream(IFile file)
     {
