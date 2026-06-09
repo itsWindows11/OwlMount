@@ -117,10 +117,10 @@ static partial class Program
 
         // ── Validate backend ──────────────────────────────────────────────────
         backend = backend.ToLowerInvariant();
-        if (backend is not ("winfsp" or "projfs"))
+        if (backend is not ("winfsp" or "projfs" or "dokany"))
         {
             Console.Error.WriteLine(
-                $"Error: unknown backend '{backend}'. Valid values: winfsp, projfs");
+                $"Error: unknown backend '{backend}'. Valid values: winfsp, projfs, dokany");
             return 1;
         }
 
@@ -312,7 +312,7 @@ static partial class Program
 
         string mountPoint  = driveLetter + ":";
 
-        // ProjFS is always read-only; ensure the flag reflects reality
+        // Enforce read-only for immutable providers or when explicitly requested.
         bool isReadOnly = forceReadOnly || root is not IModifiableFolder;
 
         Console.WriteLine($"OwlMount — provider: {provider}  backend: {backend}");
@@ -361,6 +361,15 @@ static partial class Program
 #pragma warning disable CA1416 // resolved by the version check above
             vfsBackend = new ProjFsBackend(root, blockCache, rangeReaders, sizeProviders, isReadOnly);
 #pragma warning restore CA1416
+        }
+        else if (backend == "dokany")
+        {
+            vfsBackend = new DokanyBackend(
+                root, blockCache, rangeReaders, sizeProviders,
+                readOnly: isReadOnly,
+                totalSize: totalSize,
+                freeSize: freeSize,
+                volumeLabel: resolvedLabel);
         }
         else
         {
@@ -552,7 +561,7 @@ static partial class Program
         Console.WriteLine(
             "  --provider   memory | archive | local | kubo-mfs | kubo-ipfs | kubo-ipns | s3 | nfs  (default: memory)");
         Console.WriteLine(
-            "  --backend    winfsp | projfs  (default: winfsp)");
+            "  --backend    winfsp | projfs | dokany  (default: winfsp)");
         Console.WriteLine("  --letter     Drive letter to mount on (default: M)");
         Console.WriteLine("  --label      Volume label shown in Explorer (default: auto)");
         Console.WriteLine("  --read-only  Force the mounted filesystem to open as read-only");
@@ -574,6 +583,7 @@ static partial class Program
         Console.WriteLine("  owlmount mount --provider memory --letter R --memory-size 2G");
         Console.WriteLine("  owlmount mount --provider memory --letter R --read-only");
         Console.WriteLine("  owlmount mount --provider memory --letter R --backend projfs");
+        Console.WriteLine("  owlmount mount --provider memory --letter R --backend dokany");
         Console.WriteLine("  owlmount mount --provider archive --archive-file C:\\data\\backup.zip --letter A");
         Console.WriteLine("  owlmount mount --provider local --path C:\\data --letter D");
         Console.WriteLine("  owlmount mount --provider kubo-mfs --path /my/dir --letter K --label IPFS");

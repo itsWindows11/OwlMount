@@ -10,7 +10,8 @@ using OwlMount.Core.Windows.Backends;
 namespace OwlMount.Tests;
 
 /// <summary>
-/// Unit tests for <see cref="WinFspBackend"/> and <see cref="ProjFsBackend"/>.
+/// Unit tests for <see cref="WinFspBackend"/>, <see cref="ProjFsBackend"/>,
+/// and <see cref="DokanyBackend"/>.
 /// Tests that require a specific OS version skip silently on unsupported platforms.
 /// </summary>
 public sealed class BackendTests : IDisposable
@@ -146,6 +147,66 @@ public sealed class BackendTests : IDisposable
         backend.Stop(); // must not throw
     }
 
+    // ── DokanyBackend tests ───────────────────────────────────────────────────
+
+    [Fact]
+    public void Dokany_Name_ReturnsDokany()
+    {
+        if (!IsWindows()) return;
+        using var backend = MakeDokany();
+        Assert.Equal("Dokany", backend.Name);
+    }
+
+    [Fact]
+    public void Dokany_IsReadOnly_Default_IsFalse()
+    {
+        if (!IsWindows()) return;
+        using var backend = MakeDokany(readOnly: false);
+        Assert.False(backend.IsReadOnly);
+    }
+
+    [Fact]
+    public void Dokany_IsReadOnly_True_WhenForced()
+    {
+        if (!IsWindows()) return;
+        using var backend = MakeDokany(readOnly: true);
+        Assert.True(backend.IsReadOnly);
+    }
+
+    [Fact]
+    public void Dokany_IsReadOnly_True_WhenRootIsNotModifiable()
+    {
+        if (!IsWindows()) return;
+        var blockCache = new BlockCache("backend-test", cacheDir: _tempDir);
+        var rangeReaders = new RangeReaderRegistry();
+        using var backend = new DokanyBackend(
+            new ReadOnlyFolderStub("root", "root"),
+            blockCache, rangeReaders);
+        Assert.True(backend.IsReadOnly);
+    }
+
+    [Fact]
+    public void Dokany_IsAvailable_DoesNotThrow()
+    {
+        if (!IsWindows()) return;
+        _ = DokanyBackend.IsAvailable();
+    }
+
+    [Fact]
+    public void Dokany_Dispose_BeforeStart_DoesNotThrow()
+    {
+        if (!IsWindows()) return;
+        MakeDokany().Dispose(); // must not throw
+    }
+
+    [Fact]
+    public void Dokany_Stop_BeforeStart_DoesNotThrow()
+    {
+        if (!IsWindows()) return;
+        using var backend = MakeDokany();
+        backend.Stop(); // must not throw
+    }
+
     // ── Factory helpers ───────────────────────────────────────────────────────
 
     private WinFspBackend MakeWinFsp(bool readOnly = false)
@@ -163,6 +224,15 @@ public sealed class BackendTests : IDisposable
         var blockCache   = new BlockCache("backend-test", cacheDir: _tempDir);
         var rangeReaders = new RangeReaderRegistry();
         return new ProjFsBackend(
+            new MemoryFolder("root", "root"),
+            blockCache, rangeReaders, readOnly: readOnly);
+    }
+
+    private DokanyBackend MakeDokany(bool readOnly = false)
+    {
+        var blockCache = new BlockCache("backend-test", cacheDir: _tempDir);
+        var rangeReaders = new RangeReaderRegistry();
+        return new DokanyBackend(
             new MemoryFolder("root", "root"),
             blockCache, rangeReaders, readOnly: readOnly);
     }

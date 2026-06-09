@@ -2,17 +2,18 @@
 
 A Windows-only .NET 10 application that mounts any
 [OwlCore.Storage](https://github.com/Arlodotexe/OwlCore.Storage) `IFolder` provider as a
-Windows drive letter. Two filesystem backends are available:
+Windows drive letter. Three filesystem backends are available:
 
 | Backend | Flag | Description |
 |---|---|---|
 | **WinFsp** *(default)* | `--backend winfsp` | Full read-write support via the [WinFsp](https://winfsp.dev/) user-mode driver |
+| **Dokany** | `--backend dokany` | Full read-write support via the [Dokany](https://github.com/dokan-dev/dokany) user-mode driver |
 | **ProjFS** | `--backend projfs` | Read-only; uses the built-in [Windows Projected File System](https://learn.microsoft.com/en-us/windows/win32/projfs/projected-file-system) — no additional installs required |
 
 ## Features
 
 * **WinUI 3 GUI** — full-featured desktop app with per-mount cards, selection overlay, and system-tray integration
-* **Dual-backend** — choose WinFsp for read-write, or ProjFS for zero-install read-only
+* **Multi-backend** — choose WinFsp or Dokany for read-write, or ProjFS for zero-install read-only
 * **Backend abstraction layer** — `IOwlMountBackend` interface separates mount logic from the UI/CLI
 * **Read-write support** (WinFsp) — create, write, rename, and delete files/folders
 * **Read-only support** (ProjFS / `--read-only` flag)
@@ -29,6 +30,7 @@ Windows drive letter. Two filesystem backends are available:
 2. **Windows 10 version 1809 (build 17763) or later**
 3. Backend-specific requirements:
    - **WinFsp** (default): [install WinFsp](https://winfsp.dev/rel/) — a fast, signed, free user-mode filesystem driver
+   - **Dokany**: [install Dokany](https://github.com/dokan-dev/dokany/releases)
    - **ProjFS**: enable the optional Windows feature (run once in an elevated PowerShell prompt):
      ```powershell
      Enable-WindowsOptionalFeature -Online -FeatureName Client-ProjFS -NoRestart
@@ -76,7 +78,7 @@ owlmount mount --provider memory --letter R
 | Flag | Default | Description |
 |---|---|---|
 | `--provider` | `memory` | Provider name. See table below. |
-| `--backend` | `winfsp` | VFS backend: `winfsp` or `projfs` |
+| `--backend` | `winfsp` | VFS backend: `winfsp`, `dokany`, or `projfs` |
 | `--letter` | `M` | Drive letter to mount (without the colon) |
 | `--label` | *(auto)* | Volume label shown in Explorer (e.g. `"My Files"`) |
 | `--read-only` | *(off)* | Force read-only mode (always set for ProjFS and archive) |
@@ -129,6 +131,12 @@ owlmount mount --provider memory --letter R --label "RAM Drive" --memory-size 20
 owlmount mount --provider memory --letter R --backend projfs
 ```
 
+### Example — same drive via Dokany (read-write)
+
+```bat
+owlmount mount --provider memory --letter R --backend dokany
+```
+
 ### Example — archive file read-only as `A:`
 
 ```bat
@@ -172,6 +180,7 @@ OwlMount.slnx
 │   │   ├── Backends/
 │   │   │   ├── IOwlMountBackend.cs   Abstraction interface (Start / Stop / Stopped)
 │   │   │   ├── WinFspBackend.cs      WinFsp implementation (read-write)
+│   │   │   ├── DokanyBackend.cs      Dokany implementation (read-write)
 │   │   │   └── ProjFsBackend.cs      ProjFS implementation (read-only)
 │   │   ├── OwlMountFileSystem.cs     WinFsp FileSystemBase implementation
 │   │   ├── OwlMountProvider.cs       ProjFS IRequiredCallbacks implementation
@@ -214,6 +223,7 @@ Orphaned directories (from crashes) can be removed from Settings → **Clear Pro
 ### Adding a custom provider
 
 1. Create a class implementing `OwlCore.Storage.IFolder` (and `IFile` for its children).
+   - Implement `OwlCore.Storage.IModifiableFolder` too if you want full read-write backend behavior (create/write/rename/delete); `IFolder` alone is treated as read-only.
 2. Instantiate your `IFolder` in `ProviderFactory.cs` (GUI) or `Program.cs` (CLI) and pass it to the chosen backend.
 3. Optionally register a provider-specific `IRangeReader` for optimised ranged reads:
 

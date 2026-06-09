@@ -128,6 +128,9 @@ public sealed partial class ProjFsBackend : IOwlMountBackend
 
         if (markResult != HResult.Ok)
         {
+            _vi.Dispose();
+            _vi = null;
+            ForceDeleteDirectory(_virtRoot);
             Console.Error.WriteLine($"Failed to mark virtualization root (HResult {(int)markResult:X8}).");
             Console.Error.WriteLine(
                 "The Windows Projected File System optional feature may not be enabled.");
@@ -141,6 +144,9 @@ public sealed partial class ProjFsBackend : IOwlMountBackend
         HResult startResult = _vi.StartVirtualizing(_provider);
         if (startResult != HResult.Ok)
         {
+            _vi.Dispose();
+            _vi = null;
+            ForceDeleteDirectory(_virtRoot);
             Console.Error.WriteLine(
                 $"Failed to start ProjFS virtualization (HResult {(int)startResult:X8}).");
             return false;
@@ -150,6 +156,9 @@ public sealed partial class ProjFsBackend : IOwlMountBackend
         {
             int err = Marshal.GetLastPInvokeError();
             _vi.StopVirtualizing();
+            _vi.Dispose();
+            _vi = null;
+            ForceDeleteDirectory(_virtRoot);
             Console.Error.WriteLine(
                 $"Failed to map drive letter {mountPoint} (Win32 error {err}).");
             Console.Error.WriteLine("Ensure the drive letter is not already in use.");

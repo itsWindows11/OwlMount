@@ -24,7 +24,7 @@ public partial class MainWindowViewModel : ObservableObject
     public ObservableCollection<MountEntry> SelectedMounts { get; } = [];
     public IReadOnlyList<string> Providers { get; } = ["memory", "archive", "local", "kubo-mfs", "kubo-ipfs", "kubo-ipns", "s3", "nfs"];
     public IReadOnlyList<string> ProviderDisplayNames { get; } = ["Memory", "Archive file", "Local folder", "Kubo MFS", "Kubo IPFS", "Kubo IPNS", "Amazon S3", "NFS"];
-    public IReadOnlyList<string> Backends { get; } = ["winfsp", "projfs"];
+    public IReadOnlyList<string> Backends { get; } = ["winfsp", "projfs", "dokany"];
 
     public IAsyncRelayCommand MountCommand { get; }
     public IAsyncRelayCommand AddMountCommand { get; }

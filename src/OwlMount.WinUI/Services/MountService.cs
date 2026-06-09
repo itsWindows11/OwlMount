@@ -157,9 +157,10 @@ public sealed class MountService : IDisposable
 
         // ── Create backend ─────────────────────────────────────────────────────
         IOwlMountBackend backend;
+        string selectedBackend = normalizedOpts.Backend.ToLowerInvariant();
         try
         {
-            if (normalizedOpts.Backend.Equals("projfs", StringComparison.OrdinalIgnoreCase))
+            if (selectedBackend == "projfs")
             {
                 if (!OperatingSystem.IsWindowsVersionAtLeast(10, 0, 17763))
                 {
@@ -170,7 +171,16 @@ public sealed class MountService : IDisposable
                 backend = new ProjFsBackend(pr.Root, blockCache, rangeReaders, sizeProviders, isReadOnly);
 #pragma warning restore CA1416
             }
-            else
+            else if (selectedBackend == "dokany")
+            {
+                backend = new DokanyBackend(
+                    pr.Root, blockCache, rangeReaders, sizeProviders,
+                    readOnly: isReadOnly,
+                    totalSize: pr.TotalSize,
+                    freeSize: pr.FreeSize,
+                    volumeLabel: resolvedLabel);
+            }
+            else if (selectedBackend == "winfsp")
             {
                 backend = new WinFspBackend(
                     pr.Root, blockCache, rangeReaders, sizeProviders,
@@ -178,6 +188,11 @@ public sealed class MountService : IDisposable
                     totalSize: pr.TotalSize,
                     freeSize: pr.FreeSize,
                     volumeLabel: resolvedLabel);
+            }
+            else
+            {
+                pr.ExtraDisposable?.Dispose();
+                return (false, $"Unsupported backend '{normalizedOpts.Backend}'.");
             }
         }
         catch (Exception ex)
@@ -214,7 +229,7 @@ public sealed class MountService : IDisposable
             pr.ExtraDisposable?.Dispose();
             string captured = errorBuffer.ToString().Trim();
             return (false, string.IsNullOrWhiteSpace(captured)
-                ? $"Failed to mount {mountPoint}. Ensure the required backend (WinFsp or ProjFS) is installed."
+                ? $"Failed to mount {mountPoint}. Ensure the required backend ({normalizedOpts.Backend}) is installed."
                 : captured);
         }
 
@@ -223,7 +238,7 @@ public sealed class MountService : IDisposable
             DriveLetter = mountPoint,
             Label = resolvedLabel,
             Provider = normalizedOpts.Provider,
-            BackendName = normalizedOpts.Backend,
+            BackendName = selectedBackend,
             IsReadOnly = isReadOnly,
             RootFolder = pr.Root,
             BackendInstance = backend,
@@ -590,7 +605,9 @@ public sealed class MountService : IDisposable
     private static ProviderOptions NormalizeOptions(ProviderOptions opts)
     {
         string provider = string.IsNullOrWhiteSpace(opts.Provider) ? "memory" : opts.Provider.Trim();
-        string backend = string.IsNullOrWhiteSpace(opts.Backend) ? "winfsp" : opts.Backend.Trim();
+        string backend = string.IsNullOrWhiteSpace(opts.Backend)
+            ? "winfsp"
+            : opts.Backend.Trim().ToLowerInvariant();
         string letter = string.IsNullOrWhiteSpace(opts.Letter)
             ? "M"
             : opts.Letter.Trim().TrimEnd(':').ToUpperInvariant();

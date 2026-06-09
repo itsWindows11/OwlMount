@@ -14,7 +14,7 @@ public sealed partial class MountConfigDialog : UserControl
     public MountConfigDialog()
     {
         InitializeComponent();
-        BackendBox.ItemsSource = new[] { "winfsp", "projfs" };
+        BackendBox.ItemsSource = new[] { "winfsp", "projfs", "dokany" };
         ProviderBox.ItemsSource = new[] { "memory", "archive", "local", "kubo-mfs", "kubo-ipfs", "kubo-ipns", "s3", "nfs" };
     }
 
