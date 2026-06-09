@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Security.AccessControl;
 using System.Runtime.Versioning;
 using DokanNet;
+using DokanNet.Logging;
 using OwlCore.Storage;
 using OwlMount.Core.Cache;
 using OwlMount.Core.Registry;
@@ -89,7 +90,7 @@ public sealed class DokanyBackend : IOwlMountBackend
     {
         try
         {
-            _instance = new DokanInstanceBuilder()
+            _instance = new DokanInstanceBuilder(new Dokan(new NullLogger()))
                 .ConfigureOptions(options =>
                 {
                     options.MountPoint = mountPoint;
@@ -200,7 +201,7 @@ internal sealed class DokanyOperations : IDokanOperations
         _folderCache.TryAdd(string.Empty, _root);
     }
 
-    public NtStatus CreateFile(string fileName, FileAccess access, FileShare share, FileMode mode, FileOptions options, FileAttributes attributes, IDokanFileInfo info)
+    public NtStatus CreateFile(string fileName, DokanNet.FileAccess access, FileShare share, FileMode mode, FileOptions options, FileAttributes attributes, IDokanFileInfo info)
     {
         try
         {
@@ -220,7 +221,7 @@ internal sealed class DokanyOperations : IDokanOperations
                 if (wantsDirectory && existing is not IFolder)
                     return NtStatus.ObjectNameCollision;
                 if (!wantsDirectory && existing is IFolder)
-                    return NtStatus.FileIsADirectory;
+                    return NtStatus.ObjectNameCollision;
 
                 if (mode == FileMode.CreateNew)
                     return NtStatus.ObjectNameCollision;
@@ -538,7 +539,7 @@ internal sealed class DokanyOperations : IDokanOperations
             }
             else
             {
-                return NtStatus.NotSupported;
+                return NtStatus.NotImplemented;
             }
 
             _blockCache?.Invalidate(sourceItem.Id);
@@ -694,7 +695,7 @@ internal sealed class DokanyOperations : IDokanOperations
         }
     }
 
-    private static IFolder? GetChildFolder(IFolder folder, string name) => GetChild(folder, name) as IFolder;
+    private IFolder? GetChildFolder(IFolder folder, string name) => GetChild(folder, name) as IFolder;
 
     private FileInformation BuildFileInfo(string fileName, IFile file)
     {
