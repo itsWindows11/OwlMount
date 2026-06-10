@@ -1,4 +1,6 @@
 using System.Collections.Concurrent;
+using System.Reflection;
+using System.Runtime.InteropServices;
 using System.Security.AccessControl;
 using System.Runtime.Versioning;
 using DokanNet;
@@ -17,6 +19,7 @@ namespace OwlMount.Core.Windows.Backends;
 public sealed class DokanyBackend : IOwlMountBackend
 {
     private static readonly string[] DokanyInstallProbeFiles = ["dokan2.dll", "dokan1.dll", "dokanctl.exe"];
+    private static string? _customPath;
 
     private readonly DokanyOperations _operations;
     private DokanInstance? _instance;
@@ -54,10 +57,42 @@ public sealed class DokanyBackend : IOwlMountBackend
     }
 
     /// <summary>
-    /// Returns <c>true</c> when Dokany appears to be installed on this machine.
+    /// Sets a custom directory path to search for the Dokany DLL
+    /// (<c>dokan2.dll</c> or <c>dokan1.dll</c>).
+    /// When non-null the DLL is pre-loaded from that directory so that DokanNet
+    /// can find it even if Dokany is not installed system-wide.
+    /// Pass <c>null</c> to clear the custom path.
+    /// </summary>
+    public static void SetCustomPath(string? path)
+    {
+        _customPath = string.IsNullOrWhiteSpace(path) ? null : path.Trim();
+
+        if (_customPath is null) return;
+
+        foreach (string dllName in DokanyInstallProbeFiles.Take(2)) // dokan2.dll, dokan1.dll
+        {
+            string fullPath = Path.Combine(_customPath, dllName);
+            if (File.Exists(fullPath))
+            {
+                NativeLibrary.TryLoad(fullPath, Assembly.GetExecutingAssembly(),
+                    DllImportSearchPath.AssemblyDirectory, out _);
+                break;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Returns <c>true</c> when Dokany appears to be installed on this machine
+    /// or is present at the custom path configured via <see cref="SetCustomPath"/>.
     /// </summary>
     public static bool IsAvailable()
     {
+        if (_customPath is not null)
+        {
+            if (DokanyInstallProbeFiles.Take(2).Any(name => File.Exists(Path.Combine(_customPath, name))))
+                return true;
+        }
+
         string sys32 = Environment.GetFolderPath(Environment.SpecialFolder.System);
         if (DokanyInstallProbeFiles.Take(2).Any(name => File.Exists(Path.Combine(sys32, name))))
             return true;

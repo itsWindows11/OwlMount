@@ -8,6 +8,8 @@ public sealed class AppSettingsService
     private const string ThemeKey = "AppTheme";
     private const string DefaultBlockCacheSizeKey = "DefaultBlockCacheSize";
     private const string EnableBlockCacheKey = "EnableBlockCache";
+    private const string DokanyPathKey = "DokanyPath";
+    private const string WinFspPathKey = "WinFspPath";
     private const long DefaultBlockCacheSize = 256 * 1024; // 256 KiB default
     private ApplicationDataContainer? _localSettings;
     private bool _isLoaded;
@@ -15,6 +17,8 @@ public sealed class AppSettingsService
     public ElementTheme Theme { get; private set; } = ElementTheme.Default;
     public long DefaultBlockCacheSizeBytes { get; private set; } = DefaultBlockCacheSize;
     public bool EnableBlockCache { get; private set; } = true;
+    public string? DokanyPath { get; private set; }
+    public string? WinFspPath { get; private set; }
 
     public event EventHandler<ElementTheme>? ThemeChanged;
     public event EventHandler<long>? DefaultBlockCacheSizeChanged;
@@ -42,6 +46,8 @@ public sealed class AppSettingsService
         Theme = ReadTheme();
         DefaultBlockCacheSizeBytes = ReadBlockCacheSize();
         EnableBlockCache = ReadEnableBlockCache();
+        DokanyPath = ReadStringValue(DokanyPathKey);
+        WinFspPath = ReadStringValue(WinFspPathKey);
         _isLoaded = true;
     }
 
@@ -73,6 +79,28 @@ public sealed class AppSettingsService
         _localSettings?.Values[EnableBlockCacheKey] = enabled;
 
         EnableBlockCacheChanged?.Invoke(this, enabled);
+    }
+
+    public void SetDokanyPath(string? path)
+    {
+        Load();
+        DokanyPath = string.IsNullOrWhiteSpace(path) ? null : path.Trim();
+
+        if (DokanyPath is not null)
+            _localSettings?.Values[DokanyPathKey] = DokanyPath;
+        else
+            _localSettings?.Values.Remove(DokanyPathKey);
+    }
+
+    public void SetWinFspPath(string? path)
+    {
+        Load();
+        WinFspPath = string.IsNullOrWhiteSpace(path) ? null : path.Trim();
+
+        if (WinFspPath is not null)
+            _localSettings?.Values[WinFspPathKey] = WinFspPath;
+        else
+            _localSettings?.Values.Remove(WinFspPathKey);
     }
 
     private ElementTheme ReadTheme()
@@ -117,6 +145,18 @@ public sealed class AppSettingsService
         }
 
         return true;
+    }
+
+    private string? ReadStringValue(string key)
+    {
+        if (_localSettings is null)
+            return null;
+
+        if (_localSettings.Values.TryGetValue(key, out object? raw) && raw is string text
+            && !string.IsNullOrWhiteSpace(text))
+            return text;
+
+        return null;
     }
 
     private static ElementTheme ThemeFromString(string text) =>

@@ -50,6 +50,9 @@ static partial class Program
         bool    forceReadOnly = false;
         ulong?  totalSize     = null;
         ulong?  freeSize      = null;
+        // Provider paths (Dokany & WinFsp only)
+        string? dokanyPath    = null;
+        string? winfspPath    = null;
         // S3
         string? s3Bucket   = null;
         string? s3Prefix   = null;
@@ -92,6 +95,8 @@ static partial class Program
                 case "--host":         nfsHost     = args[++i]; break;
                 case "--export":       nfsExport   = args[++i]; break;
                 case "--nfs-path":     nfsPath     = args[++i]; break;
+                case "--dokany-path":  dokanyPath  = args[++i]; break;
+                case "--winfsp-path":  winfspPath  = args[++i]; break;
                 case "--read-only":
                 case "--readonly":
                     forceReadOnly = true;
@@ -348,6 +353,12 @@ static partial class Program
         // CTS shared by CancelKeyPress and backend.Stopped so either path exits cleanly.
         var cts = new CancellationTokenSource();
 
+        // ── Apply custom provider paths (Dokany & WinFsp) ────────────────────
+        if (!string.IsNullOrWhiteSpace(winfspPath))
+            WinFspBackend.SetCustomPath(winfspPath);
+        if (!string.IsNullOrWhiteSpace(dokanyPath))
+            DokanyBackend.SetCustomPath(dokanyPath);
+
         // ── Create the backend ────────────────────────────────────────────────
         IOwlMountBackend vfsBackend;
         if (backend == "projfs")
@@ -566,6 +577,10 @@ static partial class Program
         Console.WriteLine("  --label      Volume label shown in Explorer (default: auto)");
         Console.WriteLine("  --read-only  Force the mounted filesystem to open as read-only");
         Console.WriteLine();
+        Console.WriteLine("Provider path options (third-party backends only):");
+        Console.WriteLine("  --winfsp-path  <dir>  Directory containing winfsp-x64.dll (or winfsp-x86.dll)");
+        Console.WriteLine("  --dokany-path  <dir>  Directory containing dokan2.dll (or dokan1.dll)");
+        Console.WriteLine();
         Console.WriteLine("  memory       --memory-size <limit>  (e.g. 4G, 512M, or bytes; capped at available RAM)");
         Console.WriteLine("  archive      --archive-file <local-archive-path>");
         Console.WriteLine("  local        --path <local-directory-path>");
@@ -584,6 +599,8 @@ static partial class Program
         Console.WriteLine("  owlmount mount --provider memory --letter R --read-only");
         Console.WriteLine("  owlmount mount --provider memory --letter R --backend projfs");
         Console.WriteLine("  owlmount mount --provider memory --letter R --backend dokany");
+        Console.WriteLine("  owlmount mount --provider memory --letter R --backend dokany --dokany-path \"C:\\Dokan\\bin\"");
+        Console.WriteLine("  owlmount mount --provider memory --letter R --backend winfsp --winfsp-path \"C:\\WinFsp\\bin\"");
         Console.WriteLine("  owlmount mount --provider archive --archive-file C:\\data\\backup.zip --letter A");
         Console.WriteLine("  owlmount mount --provider local --path C:\\data --letter D");
         Console.WriteLine("  owlmount mount --provider kubo-mfs --path /my/dir --letter K --label IPFS");

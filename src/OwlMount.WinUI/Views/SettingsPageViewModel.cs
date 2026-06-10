@@ -4,6 +4,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using OwlMount.Core.Windows.Backends;
 using OwlMount.WinUI.Services;
 using Windows.Storage.Pickers;
 using WinRT.Interop;
@@ -23,6 +24,8 @@ public partial class SettingsPageViewModel : ObservableObject
     private ElementTheme _selectedTheme;
     private long _defaultBlockCacheSizeBytes;
     private bool _enableBlockCache;
+    private string _winFspPath = string.Empty;
+    private string _dokanyPath = string.Empty;
 
     // BlockSizeOption moved to its own file to be resolvable from XAML.
 
@@ -32,6 +35,10 @@ public partial class SettingsPageViewModel : ObservableObject
     public IAsyncRelayCommand ClearAllCacheCommand { get; }
     public IAsyncRelayCommand ExportConfigurationCommand { get; }
     public IAsyncRelayCommand ImportConfigurationCommand { get; }
+    public IAsyncRelayCommand BrowseWinFspPathCommand { get; }
+    public IAsyncRelayCommand BrowseDokanyPathCommand { get; }
+    public IRelayCommand ClearWinFspPathCommand { get; }
+    public IRelayCommand ClearDokanyPathCommand { get; }
 
     public IReadOnlyList<ElementTheme> ThemeOptions { get; } = new[] { ElementTheme.Default, ElementTheme.Light, ElementTheme.Dark };
 
@@ -123,6 +130,44 @@ public partial class SettingsPageViewModel : ObservableObject
         }
     }
 
+    /// <summary>
+    /// Custom directory that contains <c>winfsp-x64.dll</c> (or <c>winfsp-x86.dll</c>).
+    /// Empty string means "use system default search path".
+    /// </summary>
+    public string WinFspPath
+    {
+        get => _winFspPath;
+        set
+        {
+            if (SetProperty(ref _winFspPath, value ?? string.Empty))
+            {
+                string? path = string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+                _settingsService.SetWinFspPath(path);
+                WinFspBackend.SetCustomPath(path);
+                _ = _log.InfoAsync($"WinFsp path set to: {path ?? "(default)"}.");
+            }
+        }
+    }
+
+    /// <summary>
+    /// Custom directory that contains <c>dokan2.dll</c> (or <c>dokan1.dll</c>).
+    /// Empty string means "use system default search path".
+    /// </summary>
+    public string DokanyPath
+    {
+        get => _dokanyPath;
+        set
+        {
+            if (SetProperty(ref _dokanyPath, value ?? string.Empty))
+            {
+                string? path = string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+                _settingsService.SetDokanyPath(path);
+                DokanyBackend.SetCustomPath(path);
+                _ = _log.InfoAsync($"Dokany path set to: {path ?? "(default)"}.");
+            }
+        }
+    }
+
     public Uri ProjectUrl { get; } = new("https://github.com/itsWindows11/OwlMount");
     public string AppVersion { get; } = $"OwlMount {typeof(App).Assembly.GetName().Version}";
     public string CopyrightText { get; } = "Copyright \u00a9 2026 itsWindows11 & OwlMount contributors";
@@ -141,6 +186,10 @@ public partial class SettingsPageViewModel : ObservableObject
         ClearAllCacheCommand = new AsyncRelayCommand(ClearAllCacheAsync);
         ExportConfigurationCommand = new AsyncRelayCommand(ExportConfigurationAsync);
         ImportConfigurationCommand = new AsyncRelayCommand(ImportConfigurationAsync);
+        BrowseWinFspPathCommand = new AsyncRelayCommand(BrowseWinFspPathAsync);
+        BrowseDokanyPathCommand = new AsyncRelayCommand(BrowseDokanyPathAsync);
+        ClearWinFspPathCommand = new RelayCommand(() => { WinFspPath = string.Empty; });
+        ClearDokanyPathCommand = new RelayCommand(() => { DokanyPath = string.Empty; });
 
         _selectedTheme = _settingsService.Theme;
         _defaultBlockCacheSizeBytes = _settingsService.DefaultBlockCacheSizeBytes;
@@ -149,6 +198,8 @@ public partial class SettingsPageViewModel : ObservableObject
         _persistMemoryFsOnExit = _mountService.PersistMemoryFileSystemOnExit;
         _persistMemoryFsPath = _mountService.MemoryFileSystemPersistPath;
         _isPersistMemoryFsPathEnabled = _persistMemoryFsOnExit;
+        _winFspPath = _settingsService.WinFspPath ?? string.Empty;
+        _dokanyPath = _settingsService.DokanyPath ?? string.Empty;
         BlockCacheSizeOptions =
         [
             new BlockSizeOption(65536, "64 KiB"),
@@ -316,6 +367,42 @@ public partial class SettingsPageViewModel : ObservableObject
         >= 1024               => $"{bytes / 1024.0:F1} KB",
         _                     => $"{bytes} B",
     };
+
+    private async Task BrowseWinFspPathAsync()
+    {
+        Window? window = _windowProvider();
+        if (window is null) return;
+
+        _ = _log.InfoAsync("Browsing for WinFsp path.");
+        var picker = new FolderPicker();
+        picker.FileTypeFilter.Add("*");
+        InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(window));
+
+        var folder = await picker.PickSingleFolderAsync();
+        if (folder is not null)
+        {
+            WinFspPath = folder.Path;
+            _ = _log.InfoAsync($"Selected WinFsp path: {folder.Path}");
+        }
+    }
+
+    private async Task BrowseDokanyPathAsync()
+    {
+        Window? window = _windowProvider();
+        if (window is null) return;
+
+        _ = _log.InfoAsync("Browsing for Dokany path.");
+        var picker = new FolderPicker();
+        picker.FileTypeFilter.Add("*");
+        InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(window));
+
+        var folder = await picker.PickSingleFolderAsync();
+        if (folder is not null)
+        {
+            DokanyPath = folder.Path;
+            _ = _log.InfoAsync($"Selected Dokany path: {folder.Path}");
+        }
+    }
 
     private async Task BrowseExportPathAsync()
     {

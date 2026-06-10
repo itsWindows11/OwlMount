@@ -158,6 +158,11 @@ public sealed class MountService : IDisposable
         // ── Create backend ─────────────────────────────────────────────────────
         IOwlMountBackend backend;
         string selectedBackend = normalizedOpts.Backend.ToLowerInvariant();
+
+        // Apply any user-configured provider paths before instantiating backends.
+        WinFspBackend.SetCustomPath(_appSettings.WinFspPath);
+        DokanyBackend.SetCustomPath(_appSettings.DokanyPath);
+
         try
         {
             if (selectedBackend == "projfs")
