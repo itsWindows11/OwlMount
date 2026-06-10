@@ -70,7 +70,7 @@ internal static class BackendAvailabilityDialog
             name:        "WinFsp",
             available:   winfspOk,
             downloadUrl: WinFspDownloadUrl,
-            installNote: "Download from winfsp.dev/rel/ then restart OwlMount, " +
+            installNote: $"Download from {WinFspDownloadUrl} then restart OwlMount, " +
                          "or configure the path to an existing installation in Settings."));
 
         // Dokany row
@@ -78,7 +78,7 @@ internal static class BackendAvailabilityDialog
             name:        "Dokany",
             available:   dokanyOk,
             downloadUrl: DokanyDownloadUrl,
-            installNote: "Download from github.com/dokan-dev/dokany/releases then restart OwlMount, " +
+            installNote: $"Download from {DokanyDownloadUrl} then restart OwlMount, " +
                          "or configure the path to an existing installation in Settings."));
 
         // ProjFS row
