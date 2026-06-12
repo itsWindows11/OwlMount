@@ -106,7 +106,7 @@
 
             <controls:SettingsExpander
                 Description="Custom installation directories for third-party VFS backends."
-                Header="Provider paths"
+                Header="Backend paths"
                 IsExpanded="False">
                 <controls:SettingsExpander.Items>
                     <controls:SettingsCard

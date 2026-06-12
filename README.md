@@ -88,7 +88,7 @@ owlmount mount --provider memory --letter R
 | Flag | Default | Description |
 |---|---|---|
 | `--provider` | `memory` | Provider name. See table below. |
-| `--backend` | `winfsp` | VFS backend: `winfsp`, `dokany`, or `projfs` |
+| `--backend` | `dokany` | VFS backend: `dokany`, `winfsp`, or `projfs` |
 | `--letter` | `M` | Drive letter to mount (without the colon) |
 | `--label` | *(auto)* | Volume label shown in Explorer (e.g. `"My Files"`) |
 | `--read-only` | *(off)* | Force read-only mode (always set for ProjFS and archive) |
