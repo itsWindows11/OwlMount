@@ -23,6 +23,16 @@ Windows drive letter. Two filesystem backends are available:
 * **In-memory provider** — zero-config drive backed by `OwlCore.Storage.Memory`; configurable RAM size limit
 * **Archive provider** — mount any `.zip`, `.tar`, `.rar`, etc. file read-only
 
+## Showcase
+
+### GUI/WinUI 3 app
+
+![The OwlMount WinUI 3 app in action](./media/owlmount-gui-poc.mp4)
+
+### CLI app
+
+![The OwlMount CLI app in action](./media/owlmount-cli-poc.mp4)
+
 ## Prerequisites
 
 1. **.NET 10 SDK** — <https://dot.net>
