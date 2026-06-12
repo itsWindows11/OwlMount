@@ -17,6 +17,7 @@ using OwlCore.Storage.System.IO;
 using OwlMount.Core.Abstractions;
 using OwlMount.Core.Cache;
 using OwlMount.Core.Registry;
+using OwlMount.Core.Windows;
 using OwlMount.Core.Windows.Backends;
 
 [SupportedOSPlatform("windows")]
@@ -42,9 +43,9 @@ static partial class Program
 
     static async Task<int> RunMountAsync(string[] args)
     {
-        string  provider      = "memory";
-        string  backend       = "winfsp";
-        string  letter        = "M";
+        string  provider      = OwlMountConstants.DefaultProvider;
+        string  backend       = OwlMountConstants.DefaultBackend;
+        string  letter        = OwlMountConstants.DefaultDriveLetter;
         string? label         = null;
         string? path          = null;
         bool    forceReadOnly = false;
@@ -67,7 +68,7 @@ static partial class Program
         // NFS
         string? nfsHost    = null;
         string? nfsExport  = null;
-        string? nfsPath    = "/";
+        string? nfsPath    = OwlMountConstants.DefaultNfsPath;
         // Archive
         string? archiveFile = null;
         // Memory
@@ -122,10 +123,10 @@ static partial class Program
 
         // ── Validate backend ──────────────────────────────────────────────────
         backend = backend.ToLowerInvariant();
-        if (backend is not ("winfsp" or "projfs" or "dokany"))
+        if (!OwlMountConstants.BackendIds.Contains(backend, StringComparer.OrdinalIgnoreCase))
         {
             Console.Error.WriteLine(
-                $"Error: unknown backend '{backend}'. Valid values: winfsp, projfs, dokany");
+                $"Error: unknown backend '{backend}'. Valid values: {string.Join(", ", OwlMountConstants.BackendIds)}");
             return 1;
         }
 
@@ -361,7 +362,7 @@ static partial class Program
 
         // ── Create the backend ────────────────────────────────────────────────
         IOwlMountBackend vfsBackend;
-        if (backend == "projfs")
+        if (backend == OwlMountConstants.ProjFsBackend)
         {
             if (!OperatingSystem.IsWindowsVersionAtLeast(10, 0, 17763))
             {
@@ -373,7 +374,7 @@ static partial class Program
             vfsBackend = new ProjFsBackend(root, blockCache, rangeReaders, sizeProviders, isReadOnly);
 #pragma warning restore CA1416
         }
-        else if (backend == "dokany")
+        else if (backend == OwlMountConstants.DokanyBackend)
         {
             vfsBackend = new DokanyBackend(
                 root, blockCache, rangeReaders, sizeProviders,
@@ -570,10 +571,10 @@ static partial class Program
         Console.WriteLine();
         Console.WriteLine("Mount options (all providers):");
         Console.WriteLine(
-            "  --provider   memory | archive | local | kubo-mfs | kubo-ipfs | kubo-ipns | s3 | nfs  (default: memory)");
+            $"  --provider   memory | archive | local | kubo-mfs | kubo-ipfs | kubo-ipns | s3 | nfs  (default: {OwlMountConstants.DefaultProvider})");
         Console.WriteLine(
-            "  --backend    winfsp | projfs | dokany  (default: winfsp)");
-        Console.WriteLine("  --letter     Drive letter to mount on (default: M)");
+            $"  --backend    dokany | winfsp | projfs  (default: {OwlMountConstants.DefaultBackend})");
+        Console.WriteLine($"  --letter     Drive letter to mount on (default: {OwlMountConstants.DefaultDriveLetter})");
         Console.WriteLine("  --label      Volume label shown in Explorer (default: auto)");
         Console.WriteLine("  --read-only  Force the mounted filesystem to open as read-only");
         Console.WriteLine();

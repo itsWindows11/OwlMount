@@ -5,6 +5,7 @@ using System.Text.RegularExpressions;
 using OwlCore.Storage;
 using OwlMount.Core.Cache;
 using OwlMount.Core.Registry;
+using OwlMount.Core.Windows;
 using OwlMount.Core.Windows.Backends;
 
 namespace OwlMount.WinUI.Services;
@@ -138,14 +139,14 @@ public sealed class MountService : IDisposable
         if (normalizedOpts.Provider is not ("memory" or "archive" or "local"))
         {
             // Determine if block cache should be enabled
-            bool blockCacheEnabled = normalizedOpts.EnableBlockCache ?? 
-                _appSettings.EnableBlockCache;
+                bool blockCacheEnabled = normalizedOpts.EnableBlockCache ??
+                    _appSettings.GetSetting<bool>("EnableBlockCache");
 
             if (blockCacheEnabled)
             {
                 // Determine block cache size: per-mount overrides global
-                long blockCacheSize = normalizedOpts.BlockCacheSizeBytes ?? 
-                    _appSettings.DefaultBlockCacheSizeBytes;
+                long blockCacheSize = normalizedOpts.BlockCacheSizeBytes ??
+                    _appSettings.GetSetting<long>("DefaultBlockCacheSize");
 
                 blockCache = new BlockCache(
                     providerId: $"{normalizedOpts.Provider}_{pr.Root.Id}",
@@ -165,7 +166,7 @@ public sealed class MountService : IDisposable
 
         try
         {
-            if (selectedBackend == "projfs")
+            if (selectedBackend == OwlMountConstants.ProjFsBackend)
             {
                 if (!OperatingSystem.IsWindowsVersionAtLeast(10, 0, 17763))
                 {
@@ -176,7 +177,7 @@ public sealed class MountService : IDisposable
                 backend = new ProjFsBackend(pr.Root, blockCache, rangeReaders, sizeProviders, isReadOnly);
 #pragma warning restore CA1416
             }
-            else if (selectedBackend == "dokany")
+            else if (selectedBackend == OwlMountConstants.DokanyBackend)
             {
                 backend = new DokanyBackend(
                     pr.Root, blockCache, rangeReaders, sizeProviders,
@@ -185,7 +186,7 @@ public sealed class MountService : IDisposable
                     freeSize: pr.FreeSize,
                     volumeLabel: resolvedLabel);
             }
-            else if (selectedBackend == "winfsp")
+            else if (selectedBackend == OwlMountConstants.WinFspBackend)
             {
                 backend = new WinFspBackend(
                     pr.Root, blockCache, rangeReaders, sizeProviders,
@@ -609,12 +610,12 @@ public sealed class MountService : IDisposable
 
     private static ProviderOptions NormalizeOptions(ProviderOptions opts)
     {
-        string provider = string.IsNullOrWhiteSpace(opts.Provider) ? "memory" : opts.Provider.Trim();
+        string provider = string.IsNullOrWhiteSpace(opts.Provider) ? OwlMountConstants.DefaultProvider : opts.Provider.Trim();
         string backend = string.IsNullOrWhiteSpace(opts.Backend)
-            ? "winfsp"
+            ? OwlMountConstants.DefaultBackend
             : opts.Backend.Trim().ToLowerInvariant();
         string letter = string.IsNullOrWhiteSpace(opts.Letter)
-            ? "M"
+            ? OwlMountConstants.DefaultDriveLetter
             : opts.Letter.Trim().TrimEnd(':').ToUpperInvariant();
 
         return new ProviderOptions
@@ -638,7 +639,7 @@ public sealed class MountService : IDisposable
             S3Endpoint = opts.S3Endpoint,
             NfsHost = opts.NfsHost,
             NfsExport = opts.NfsExport,
-            NfsPath = string.IsNullOrWhiteSpace(opts.NfsPath) ? "/" : opts.NfsPath,
+            NfsPath = string.IsNullOrWhiteSpace(opts.NfsPath) ? OwlMountConstants.DefaultNfsPath : opts.NfsPath,
         };
     }
 
@@ -728,6 +729,8 @@ public sealed class MountService : IDisposable
             SaveMountPointConfigurations = state.SaveMountPointConfigurations;
             PersistMemoryFileSystemOnExit = state.PersistMemoryFileSystemOnExit;
             MemoryFileSystemPersistPath = NormalizePersistPath(state.MemoryFileSystemPersistPath);
+            _appSettings.SetSetting(OwlMountConstants.DefaultProviderSettingKey, state.DefaultProvider);
+            _appSettings.SetSetting(OwlMountConstants.DefaultBackendSettingKey, state.DefaultBackend);
             _mountConfigurations.Clear();
 
             foreach (ProviderOptions opts in state.MountPoints)
@@ -757,6 +760,8 @@ public sealed class MountService : IDisposable
                     SaveMountPointConfigurations = SaveMountPointConfigurations,
                     PersistMemoryFileSystemOnExit = PersistMemoryFileSystemOnExit,
                     MemoryFileSystemPersistPath = MemoryFileSystemPersistPath,
+                    DefaultProvider = _appSettings.GetSetting<string>(OwlMountConstants.DefaultProviderSettingKey),
+                    DefaultBackend = _appSettings.GetSetting<string>(OwlMountConstants.DefaultBackendSettingKey),
                     MountPoints = SaveMountPointConfigurations
                         ? [.. _mountConfigurations.Values]
                         : [],
@@ -794,6 +799,8 @@ public sealed class MountService : IDisposable
                     SaveMountPointConfigurations = SaveMountPointConfigurations,
                     PersistMemoryFileSystemOnExit = PersistMemoryFileSystemOnExit,
                     MemoryFileSystemPersistPath = MemoryFileSystemPersistPath,
+                    DefaultProvider = _appSettings.GetSetting<string>(OwlMountConstants.DefaultProviderSettingKey),
+                    DefaultBackend = _appSettings.GetSetting<string>(OwlMountConstants.DefaultBackendSettingKey),
                     MountPoints = [.. _mountConfigurations.Values],
                 };
             }
@@ -835,6 +842,8 @@ public sealed class MountService : IDisposable
                     SaveMountPointConfigurations = state.SaveMountPointConfigurations;
                     PersistMemoryFileSystemOnExit = state.PersistMemoryFileSystemOnExit;
                     MemoryFileSystemPersistPath = NormalizePersistPath(state.MemoryFileSystemPersistPath);
+                    _appSettings.SetSetting(OwlMountConstants.DefaultProviderSettingKey, state.DefaultProvider);
+                    _appSettings.SetSetting(OwlMountConstants.DefaultBackendSettingKey, state.DefaultBackend);
                 }
 
                 if (importMountPoints && state.MountPoints.Count > 0)
@@ -866,6 +875,8 @@ internal sealed class MountConfigurationState
     public bool SaveMountPointConfigurations { get; init; } = true;
     public bool PersistMemoryFileSystemOnExit { get; init; }
     public string? MemoryFileSystemPersistPath { get; init; }
+    public string DefaultProvider { get; init; } = OwlMountConstants.DefaultProvider;
+    public string DefaultBackend { get; init; } = OwlMountConstants.DefaultBackend;
     public List<ProviderOptions> MountPoints { get; init; } = [];
 }
 

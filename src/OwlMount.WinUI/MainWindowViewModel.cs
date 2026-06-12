@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Microsoft.UI.Xaml;
+using OwlMount.Core.Windows;
 using OwlMount.WinUI.Services;
 
 namespace OwlMount.WinUI;
@@ -12,6 +13,7 @@ public partial class MainWindowViewModel : ObservableObject
     private readonly IAppExitService _exitService;
     private readonly INavigationService _navigation;
     private readonly LocalLogService _log;
+    private readonly AppSettingsService _settings;
     private Func<Task<ProviderOptions?>> _addMountDialog = () => Task.FromResult<ProviderOptions?>(null);
     private Func<MountEntry, Task<ProviderOptions?>> _editMountDialog = _ => Task.FromResult<ProviderOptions?>(null);
     private Func<Task<bool>> _confirmUnmount = () => Task.FromResult(false);
@@ -22,9 +24,9 @@ public partial class MainWindowViewModel : ObservableObject
 
     public ObservableCollection<MountEntry> Mounts { get; } = [];
     public ObservableCollection<MountEntry> SelectedMounts { get; } = [];
-    public IReadOnlyList<string> Providers { get; } = ["memory", "archive", "local", "kubo-mfs", "kubo-ipfs", "kubo-ipns", "s3", "nfs"];
-    public IReadOnlyList<string> ProviderDisplayNames { get; } = ["Memory", "Archive file", "Local folder", "Kubo MFS", "Kubo IPFS", "Kubo IPNS", "Amazon S3", "NFS"];
-    public IReadOnlyList<string> Backends { get; } = ["winfsp", "projfs", "dokany"];
+    public IReadOnlyList<string> Providers { get; } = OwlMountConstants.ProviderIds;
+    public IReadOnlyList<string> ProviderDisplayNames { get; } = [.. OwlMountConstants.ProviderIds.Select(OwlMountConstants.GetProviderDisplayName)];
+    public IReadOnlyList<string> Backends { get; } = OwlMountConstants.BackendIds;
 
     public IAsyncRelayCommand MountCommand { get; }
     public IAsyncRelayCommand AddMountCommand { get; }
@@ -79,21 +81,22 @@ public partial class MainWindowViewModel : ObservableObject
     [ObservableProperty] public partial Visibility S3Visibility { get; set; }
     [ObservableProperty] public partial Visibility NfsVisibility { get; set; }
 
-    public MainWindowViewModel(MountService mountService, IAppExitService exitService, INavigationService navigation, LocalLogService log, Func<string?>? s3SecretProvider = null)
+    public MainWindowViewModel(MountService mountService, IAppExitService exitService, INavigationService navigation, LocalLogService log, AppSettingsService settings, Func<string?>? s3SecretProvider = null)
     {
         _mountService = mountService;
         _exitService = exitService;
         _navigation = navigation;
         _log = log;
+        _settings = settings;
         _s3SecretProvider = s3SecretProvider ?? (() => null);
 
         StatusMessage = string.Empty;
-        SelectedProvider = "memory";
-        SelectedBackend = "winfsp";
-        DriveLetters = "M";
+        SelectedProvider = _settings.GetSetting<string>(OwlMountConstants.DefaultProviderSettingKey);
+        SelectedBackend = _settings.GetSetting<string>(OwlMountConstants.DefaultBackendSettingKey);
+        DriveLetters = OwlMountConstants.DefaultDriveLetter;
         ReadOnlyEnabled = true;
         PersistMemoryFsPath = string.Empty;
-        NfsPath = "/";
+        NfsPath = OwlMountConstants.DefaultNfsPath;
         LocalOrArchiveVisibility = Visibility.Visible;
         KuboVisibility = Visibility.Collapsed;
         S3Visibility = Visibility.Collapsed;
@@ -511,7 +514,7 @@ public partial class MainWindowViewModel : ObservableObject
                 S3Endpoint = NullIfBlank(opts.S3Endpoint),
                 NfsHost = NullIfBlank(opts.NfsHost),
                 NfsExport = NullIfBlank(opts.NfsExport),
-                NfsPath = NullIfBlank(opts.NfsPath) ?? "/",
+                NfsPath = NullIfBlank(opts.NfsPath) ?? OwlMountConstants.DefaultNfsPath,
             };
 
             var (success, error) = await _mountService.MountAsync(mountOpts);
@@ -648,18 +651,7 @@ public partial class MainWindowViewModel : ObservableObject
     }
 
     public static string GetProviderDisplayName(string provider) =>
-        provider.ToLowerInvariant() switch
-        {
-            "memory" => "Memory",
-            "archive" => "Archive file",
-            "local" => "Local folder",
-            "kubo-mfs" => "Kubo MFS",
-            "kubo-ipfs" => "Kubo IPFS",
-            "kubo-ipns" => "Kubo IPNS",
-            "s3" => "Amazon S3",
-            "nfs" => "NFS",
-            _ => provider,
-        };
+        OwlMountConstants.GetProviderDisplayName(provider);
 
     private static string? NullIfBlank(string? s) =>
         string.IsNullOrWhiteSpace(s) ? null : s.Trim();

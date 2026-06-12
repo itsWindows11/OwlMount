@@ -39,7 +39,8 @@ public partial class App : Application
             sp.GetRequiredService<MountService>(),
             sp.GetRequiredService<IAppExitService>(),
             sp.GetRequiredService<INavigationService>(),
-            sp.GetRequiredService<LocalLogService>()));
+            sp.GetRequiredService<LocalLogService>(),
+            sp.GetRequiredService<AppSettingsService>()));
         services.AddSingleton(sp => new Views.SettingsPageViewModel(
             sp.GetRequiredService<MountService>(),
             sp.GetRequiredService<AppSettingsService>(),

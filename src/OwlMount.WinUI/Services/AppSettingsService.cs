@@ -1,28 +1,36 @@
 using Microsoft.UI.Xaml;
+using OwlMount.Core.Windows;
 using Windows.Storage;
 
 namespace OwlMount.WinUI.Services;
 
 public sealed class AppSettingsService
 {
-    private const string ThemeKey = "AppTheme";
-    private const string DefaultBlockCacheSizeKey = "DefaultBlockCacheSize";
-    private const string EnableBlockCacheKey = "EnableBlockCache";
-    private const string DokanyPathKey = "DokanyPath";
-    private const string WinFspPathKey = "WinFspPath";
+    private const string ThemeKey = OwlMountConstants.ThemeSettingKey;
+    private const string DefaultBlockCacheSizeKey = OwlMountConstants.DefaultBlockCacheSizeSettingKey;
+    private const string EnableBlockCacheKey = OwlMountConstants.EnableBlockCacheSettingKey;
+    private const string DokanyPathKey = OwlMountConstants.DokanyPathSettingKey;
+    private const string WinFspPathKey = OwlMountConstants.WinFspPathSettingKey;
+    private const string DefaultProviderKey = OwlMountConstants.DefaultProviderSettingKey;
+    private const string DefaultBackendKey = OwlMountConstants.DefaultBackendSettingKey;
     private const long DefaultBlockCacheSize = 256 * 1024; // 256 KiB default
+
+    private readonly Dictionary<string, object> _defaults = new(StringComparer.OrdinalIgnoreCase)
+    {
+        [ThemeKey] = ElementTheme.Default,
+        [DefaultBlockCacheSizeKey] = DefaultBlockCacheSize,
+        [EnableBlockCacheKey] = true,
+        [DefaultProviderKey] = OwlMountConstants.DefaultProvider,
+        [DefaultBackendKey] = OwlMountConstants.DefaultBackend,
+    };
+
     private ApplicationDataContainer? _localSettings;
     private bool _isLoaded;
 
-    public ElementTheme Theme { get; private set; } = ElementTheme.Default;
-    public long DefaultBlockCacheSizeBytes { get; private set; } = DefaultBlockCacheSize;
-    public bool EnableBlockCache { get; private set; } = true;
     public string? DokanyPath { get; private set; }
     public string? WinFspPath { get; private set; }
 
-    public event EventHandler<ElementTheme>? ThemeChanged;
-    public event EventHandler<long>? DefaultBlockCacheSizeChanged;
-    public event EventHandler<bool>? EnableBlockCacheChanged;
+    public event EventHandler<AppSettingChangedEventArgs>? SettingChanged;
 
     public void Load()
     {
@@ -36,115 +44,114 @@ public sealed class AppSettingsService
         catch
         {
             _localSettings = null;
-            Theme = ElementTheme.Default;
-            DefaultBlockCacheSizeBytes = DefaultBlockCacheSize;
-            EnableBlockCache = true;
             _isLoaded = true;
             return;
         }
 
-        Theme = ReadTheme();
-        DefaultBlockCacheSizeBytes = ReadBlockCacheSize();
-        EnableBlockCache = ReadEnableBlockCache();
         DokanyPath = ReadStringValue(DokanyPathKey);
         WinFspPath = ReadStringValue(WinFspPathKey);
         _isLoaded = true;
     }
 
-    public void SetTheme(ElementTheme theme)
+    public void SetSetting<T>(string key, T value)
     {
         Load();
-        Theme = theme;
 
-        _localSettings?.Values[ThemeKey] = ThemeToString(theme);
+        object stored = NormalizeValue(key, value);
+        if (_localSettings is not null)
+            _localSettings.Values[key] = stored;
 
-        ThemeChanged?.Invoke(this, theme);
+        SettingChanged?.Invoke(this, new AppSettingChangedEventArgs(key, stored));
     }
 
-    public void SetDefaultBlockCacheSize(long sizeBytes)
+    public T GetSetting<T>(string key)
     {
         Load();
-        DefaultBlockCacheSizeBytes = sizeBytes;
 
-        _localSettings?.Values[DefaultBlockCacheSizeKey] = sizeBytes;
+        if (_localSettings is not null && _localSettings.Values.TryGetValue(key, out object? raw))
+        {
+            if (raw is T typed)
+                return typed;
 
-        DefaultBlockCacheSizeChanged?.Invoke(this, sizeBytes);
-    }
+            object? converted = ConvertSetting(raw, typeof(T));
+            if (converted is T convertedTyped)
+                return convertedTyped;
+        }
 
-    public void SetEnableBlockCache(bool enabled)
-    {
-        Load();
-        EnableBlockCache = enabled;
+        if (_defaults.TryGetValue(key, out object? defaultValue) && defaultValue is T defaultTyped)
+            return defaultTyped;
 
-        _localSettings?.Values[EnableBlockCacheKey] = enabled;
-
-        EnableBlockCacheChanged?.Invoke(this, enabled);
+        return default!;
     }
 
     public void SetDokanyPath(string? path)
     {
         Load();
-        DokanyPath = string.IsNullOrWhiteSpace(path) ? null : path.Trim();
+        DokanyPath = NormalizeOptionalPath(path);
 
         if (DokanyPath is not null)
             _localSettings?.Values[DokanyPathKey] = DokanyPath;
         else
             _localSettings?.Values.Remove(DokanyPathKey);
+
+        SettingChanged?.Invoke(this, new AppSettingChangedEventArgs(DokanyPathKey, DokanyPath));
     }
 
     public void SetWinFspPath(string? path)
     {
         Load();
-        WinFspPath = string.IsNullOrWhiteSpace(path) ? null : path.Trim();
+        WinFspPath = NormalizeOptionalPath(path);
 
         if (WinFspPath is not null)
             _localSettings?.Values[WinFspPathKey] = WinFspPath;
         else
             _localSettings?.Values.Remove(WinFspPathKey);
+
+        SettingChanged?.Invoke(this, new AppSettingChangedEventArgs(WinFspPathKey, WinFspPath));
     }
 
-    private ElementTheme ReadTheme()
+    private static object NormalizeValue<T>(string key, T value)
     {
-        if (_localSettings is null)
-            return ElementTheme.Default;
+        if (key.Equals(ThemeKey, StringComparison.OrdinalIgnoreCase) && value is ElementTheme theme)
+            return theme.ToString();
 
-        ApplicationDataContainer localSettings = _localSettings;
-        if (localSettings.Values.TryGetValue(ThemeKey, out object? raw) && raw is string text)
+        if (key.Equals(DefaultProviderKey, StringComparison.OrdinalIgnoreCase) ||
+            key.Equals(DefaultBackendKey, StringComparison.OrdinalIgnoreCase))
+        {
+            return (value?.ToString() ?? string.Empty).Trim().ToLowerInvariant();
+        }
+
+        if (key.Equals(DefaultBlockCacheSizeKey, StringComparison.OrdinalIgnoreCase))
+        {
+            if (value is long longValue) return longValue;
+            if (value is int intValue) return (long)intValue;
+        }
+
+        return value is null ? string.Empty : value;
+    }
+
+    private static object? ConvertSetting(object raw, Type targetType)
+    {
+        if (targetType == typeof(string))
+            return raw.ToString();
+
+        if (targetType == typeof(long))
+        {
+            if (raw is long longValue) return longValue;
+            if (raw is int intValue) return (long)intValue;
+            if (long.TryParse(raw.ToString(), out long parsedLong)) return parsedLong;
+        }
+
+        if (targetType == typeof(bool))
+        {
+            if (raw is bool boolValue) return boolValue;
+            if (bool.TryParse(raw.ToString(), out bool parsedBool)) return parsedBool;
+        }
+
+        if (targetType == typeof(ElementTheme) && raw is string text)
             return ThemeFromString(text);
 
-        return ElementTheme.Default;
-    }
-
-    private long ReadBlockCacheSize()
-    {
-        if (_localSettings is null)
-            return DefaultBlockCacheSize;
-
-        ApplicationDataContainer localSettings = _localSettings;
-        if (localSettings.Values.TryGetValue(DefaultBlockCacheSizeKey, out object? raw))
-        {
-            if (raw is long longValue)
-                return longValue > 0 ? longValue : DefaultBlockCacheSize;
-            if (raw is int intValue)
-                return intValue > 0 ? intValue : DefaultBlockCacheSize;
-        }
-
-        return DefaultBlockCacheSize;
-    }
-
-    private bool ReadEnableBlockCache()
-    {
-        if (_localSettings is null)
-            return true;
-
-        ApplicationDataContainer localSettings = _localSettings;
-        if (localSettings.Values.TryGetValue(EnableBlockCacheKey, out object? raw))
-        {
-            if (raw is bool boolValue)
-                return boolValue;
-        }
-
-        return true;
+        return null;
     }
 
     private string? ReadStringValue(string key)
@@ -152,12 +159,18 @@ public sealed class AppSettingsService
         if (_localSettings is null)
             return null;
 
-        if (_localSettings.Values.TryGetValue(key, out object? raw) && raw is string text
-            && !string.IsNullOrWhiteSpace(text))
+        if (_localSettings.Values.TryGetValue(key, out object? raw) &&
+            raw is string text &&
+            !string.IsNullOrWhiteSpace(text))
+        {
             return text;
+        }
 
         return null;
     }
+
+    private static string? NormalizeOptionalPath(string? path) =>
+        string.IsNullOrWhiteSpace(path) ? null : path.Trim();
 
     private static ElementTheme ThemeFromString(string text) =>
         text.Trim().ToLowerInvariant() switch
@@ -167,12 +180,10 @@ public sealed class AppSettingsService
             "default" => ElementTheme.Default,
             _ => ElementTheme.Default,
         };
+}
 
-    private static string ThemeToString(ElementTheme theme) =>
-        theme switch
-        {
-            ElementTheme.Light => "Light",
-            ElementTheme.Dark => "Dark",
-            _ => "Default",
-        };
+public sealed class AppSettingChangedEventArgs(string key, object? value) : EventArgs
+{
+    public string Key { get; } = key;
+    public object? Value { get; } = value;
 }

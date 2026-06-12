@@ -5,6 +5,7 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Animation;
+using OwlMount.Core.Windows;
 using OwlMount.WinUI.Services;
 using OwlMount.WinUI.Views;
 using Microsoft.UI.Windowing;
@@ -27,8 +28,8 @@ public sealed partial class MainWindow : Window
         ViewModel = app.Services.GetRequiredService<MainWindowViewModel>();
         SettingsViewModel = app.Services.GetRequiredService<SettingsPageViewModel>();
         InitializeComponent();
-        RootGrid.RequestedTheme = AppSettings.Theme;
-        AppSettings.ThemeChanged += OnThemeChanged;
+        RootGrid.RequestedTheme = AppSettings.GetSetting<Microsoft.UI.Xaml.ElementTheme>(OwlMountConstants.ThemeSettingKey);
+        AppSettings.SettingChanged += OnSettingChanged;
         ExtendsContentIntoTitleBar = true;
         SetTitleBar(AppTitleBar);
         SystemBackdrop = new MicaBackdrop { Kind = MicaKind.BaseAlt };
@@ -38,12 +39,19 @@ public sealed partial class MainWindow : Window
             presenter.PreferredMinimumWidth = 700;
             presenter.PreferredMinimumHeight = 500;
         }
+
         Navigation.BackButtonVisibilityChanged += Navigation_BackButtonVisibilityChanged;
         Navigation.Attach(ContentFrame);
         Navigation.ShowHomePage();
 
         AppTitleBar.Loaded += AppTitleBar_Loaded;
         Activated += OnFirstActivated;
+    }
+
+    private void OnSettingChanged(object? sender, AppSettingChangedEventArgs e)
+    {
+        if (e.Key.Equals(OwlMountConstants.ThemeSettingKey, StringComparison.OrdinalIgnoreCase) && e.Value is Microsoft.UI.Xaml.ElementTheme theme)
+            RootGrid.RequestedTheme = theme;
     }
 
     private void AppTitleBar_Loaded(object sender, RoutedEventArgs e)

@@ -7,6 +7,7 @@ using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Composition;
 using Microsoft.UI.Xaml.Hosting;
+using OwlMount.Core.Windows;
 using OwlMount.WinUI.Services;
 
 namespace OwlMount.WinUI.Views;
@@ -52,7 +53,7 @@ public sealed partial class HomePage : Page
         existing ??= new ProviderOptions
         {
             Provider = selected.Provider,
-            Backend = "winfsp",
+            Backend = OwlMountConstants.DefaultBackend,
             Letter = selected.DriveLetter,
             Label = selected.Label,
         };
