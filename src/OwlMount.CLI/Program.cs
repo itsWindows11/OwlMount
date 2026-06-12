@@ -17,6 +17,7 @@ using OwlCore.Storage.System.IO;
 using OwlMount.Core.Abstractions;
 using OwlMount.Core.Cache;
 using OwlMount.Core.Registry;
+using OwlMount.Core.Windows;
 using OwlMount.Core.Windows.Backends;
 
 [SupportedOSPlatform("windows")]
@@ -42,14 +43,17 @@ static partial class Program
 
     static async Task<int> RunMountAsync(string[] args)
     {
-        string  provider      = "memory";
-        string  backend       = "winfsp";
-        string  letter        = "M";
+        string  provider      = OwlMountConstants.DefaultProvider;
+        string  backend       = OwlMountConstants.DefaultBackend;
+        string  letter        = OwlMountConstants.DefaultDriveLetter;
         string? label         = null;
         string? path          = null;
         bool    forceReadOnly = false;
         ulong?  totalSize     = null;
         ulong?  freeSize      = null;
+        // Provider paths (Dokany & WinFsp only)
+        string? dokanyPath    = null;
+        string? winfspPath    = null;
         // S3
         string? s3Bucket   = null;
         string? s3Prefix   = null;
@@ -64,7 +68,7 @@ static partial class Program
         // NFS
         string? nfsHost    = null;
         string? nfsExport  = null;
-        string? nfsPath    = "/";
+        string? nfsPath    = OwlMountConstants.DefaultNfsPath;
         // Archive
         string? archiveFile = null;
         // Memory
@@ -92,6 +96,8 @@ static partial class Program
                 case "--host":         nfsHost     = args[++i]; break;
                 case "--export":       nfsExport   = args[++i]; break;
                 case "--nfs-path":     nfsPath     = args[++i]; break;
+                case "--dokany-path":  dokanyPath  = args[++i]; break;
+                case "--winfsp-path":  winfspPath  = args[++i]; break;
                 case "--read-only":
                 case "--readonly":
                     forceReadOnly = true;
@@ -117,10 +123,10 @@ static partial class Program
 
         // ── Validate backend ──────────────────────────────────────────────────
         backend = backend.ToLowerInvariant();
-        if (backend is not ("winfsp" or "projfs"))
+        if (!OwlMountConstants.BackendIds.Contains(backend, StringComparer.OrdinalIgnoreCase))
         {
             Console.Error.WriteLine(
-                $"Error: unknown backend '{backend}'. Valid values: winfsp, projfs");
+                $"Error: unknown backend '{backend}'. Valid values: {string.Join(", ", OwlMountConstants.BackendIds)}");
             return 1;
         }
 
@@ -312,7 +318,7 @@ static partial class Program
 
         string mountPoint  = driveLetter + ":";
 
-        // ProjFS is always read-only; ensure the flag reflects reality
+        // Enforce read-only for immutable providers or when explicitly requested.
         bool isReadOnly = forceReadOnly || root is not IModifiableFolder;
 
         Console.WriteLine($"OwlMount — provider: {provider}  backend: {backend}");
@@ -348,9 +354,15 @@ static partial class Program
         // CTS shared by CancelKeyPress and backend.Stopped so either path exits cleanly.
         var cts = new CancellationTokenSource();
 
+        // ── Apply custom provider paths (Dokany & WinFsp) ────────────────────
+        if (!string.IsNullOrWhiteSpace(winfspPath))
+            WinFspBackend.SetCustomPath(winfspPath);
+        if (!string.IsNullOrWhiteSpace(dokanyPath))
+            DokanyBackend.SetCustomPath(dokanyPath);
+
         // ── Create the backend ────────────────────────────────────────────────
         IOwlMountBackend vfsBackend;
-        if (backend == "projfs")
+        if (backend == OwlMountConstants.ProjFsBackend)
         {
             if (!OperatingSystem.IsWindowsVersionAtLeast(10, 0, 17763))
             {
@@ -361,6 +373,15 @@ static partial class Program
 #pragma warning disable CA1416 // resolved by the version check above
             vfsBackend = new ProjFsBackend(root, blockCache, rangeReaders, sizeProviders, isReadOnly);
 #pragma warning restore CA1416
+        }
+        else if (backend == OwlMountConstants.DokanyBackend)
+        {
+            vfsBackend = new DokanyBackend(
+                root, blockCache, rangeReaders, sizeProviders,
+                readOnly: isReadOnly,
+                totalSize: totalSize,
+                freeSize: freeSize,
+                volumeLabel: resolvedLabel);
         }
         else
         {
@@ -550,12 +571,16 @@ static partial class Program
         Console.WriteLine();
         Console.WriteLine("Mount options (all providers):");
         Console.WriteLine(
-            "  --provider   memory | archive | local | kubo-mfs | kubo-ipfs | kubo-ipns | s3 | nfs  (default: memory)");
+            $"  --provider   memory | archive | local | kubo-mfs | kubo-ipfs | kubo-ipns | s3 | nfs  (default: {OwlMountConstants.DefaultProvider})");
         Console.WriteLine(
-            "  --backend    winfsp | projfs  (default: winfsp)");
-        Console.WriteLine("  --letter     Drive letter to mount on (default: M)");
+            $"  --backend    dokany | winfsp | projfs  (default: {OwlMountConstants.DefaultBackend})");
+        Console.WriteLine($"  --letter     Drive letter to mount on (default: {OwlMountConstants.DefaultDriveLetter})");
         Console.WriteLine("  --label      Volume label shown in Explorer (default: auto)");
         Console.WriteLine("  --read-only  Force the mounted filesystem to open as read-only");
+        Console.WriteLine();
+        Console.WriteLine("Provider path options (third-party backends only):");
+        Console.WriteLine("  --winfsp-path  <dir>  Directory containing winfsp-x64.dll (or winfsp-x86.dll)");
+        Console.WriteLine("  --dokany-path  <dir>  Directory containing dokan2.dll (or dokan1.dll)");
         Console.WriteLine();
         Console.WriteLine("  memory       --memory-size <limit>  (e.g. 4G, 512M, or bytes; capped at available RAM)");
         Console.WriteLine("  archive      --archive-file <local-archive-path>");
@@ -574,6 +599,9 @@ static partial class Program
         Console.WriteLine("  owlmount mount --provider memory --letter R --memory-size 2G");
         Console.WriteLine("  owlmount mount --provider memory --letter R --read-only");
         Console.WriteLine("  owlmount mount --provider memory --letter R --backend projfs");
+        Console.WriteLine("  owlmount mount --provider memory --letter R --backend dokany");
+        Console.WriteLine("  owlmount mount --provider memory --letter R --backend dokany --dokany-path \"C:\\Dokan\\bin\"");
+        Console.WriteLine("  owlmount mount --provider memory --letter R --backend winfsp --winfsp-path \"C:\\WinFsp\\bin\"");
         Console.WriteLine("  owlmount mount --provider archive --archive-file C:\\data\\backup.zip --letter A");
         Console.WriteLine("  owlmount mount --provider local --path C:\\data --letter D");
         Console.WriteLine("  owlmount mount --provider kubo-mfs --path /my/dir --letter K --label IPFS");

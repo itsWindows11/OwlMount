@@ -1,3 +1,5 @@
+using System.Reflection;
+using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using Fsp;
 using OwlCore.Storage;
@@ -15,6 +17,9 @@ namespace OwlMount.Core.Windows.Backends;
 [SupportedOSPlatform("windows")]
 public sealed class WinFspBackend : IOwlMountBackend
 {
+    private static readonly string[] WinFspDllNames = ["winfsp-x64.dll", "winfsp-x86.dll", "winfsp-arm64.dll"];
+    private static string? _customPath;
+
     private readonly OwlMountFileSystem _fs;
     private FileSystemHost? _host;
     private readonly string? _volumeLabel;
@@ -51,11 +56,43 @@ public sealed class WinFspBackend : IOwlMountBackend
     }
 
     /// <summary>
-    /// Returns <c>true</c> when WinFsp appears to be installed on this machine.
+    /// Sets a custom directory path to search for the WinFsp DLL
+    /// (<c>winfsp-x64.dll</c>, <c>winfsp-x86.dll</c>, or <c>winfsp-arm64.dll</c>).
+    /// When non-null the DLL is pre-loaded from that directory so that the WinFsp
+    /// managed wrapper can find it even if WinFsp is not installed system-wide.
+    /// Pass <c>null</c> to clear the custom path.
+    /// </summary>
+    public static void SetCustomPath(string? path)
+    {
+        _customPath = string.IsNullOrWhiteSpace(path) ? null : path.Trim();
+
+        if (_customPath is null) return;
+
+        foreach (string dllName in WinFspDllNames)
+        {
+            string fullPath = Path.Combine(_customPath, dllName);
+            if (File.Exists(fullPath))
+            {
+                NativeLibrary.TryLoad(fullPath, Assembly.GetExecutingAssembly(),
+                    DllImportSearchPath.AssemblyDirectory, out _);
+                break;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Returns <c>true</c> when WinFsp appears to be installed on this machine
+    /// or is present at the custom path configured via <see cref="SetCustomPath"/>.
     /// Performs a lightweight probe — does not start the driver.
     /// </summary>
     public static bool IsAvailable()
     {
+        if (_customPath is not null)
+        {
+            if (WinFspDllNames.Any(name => File.Exists(Path.Combine(_customPath, name))))
+                return true;
+        }
+
         string pf   = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
         string pf86 = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86);
         return File.Exists(Path.Combine(pf,   "WinFsp", "bin", "winfsp-x64.dll"))

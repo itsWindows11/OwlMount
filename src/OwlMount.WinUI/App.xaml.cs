@@ -2,7 +2,9 @@ using System.Drawing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
+using OwlMount.Core.Windows.Backends;
 using OwlMount.WinUI.Services;
+using OwlMount.WinUI.Views;
 
 namespace OwlMount.WinUI;
 
@@ -52,6 +54,11 @@ public partial class App : Application
         // Load app settings early
         AppSettings.Load();
 
+        // Apply any user-configured provider paths so backends can be found
+        // even when not installed to their default locations.
+        WinFspBackend.SetCustomPath(AppSettings.WinFspPath);
+        DokanyBackend.SetCustomPath(AppSettings.DokanyPath);
+
         AppExitService.SetExitAction(ExitApp);
         MountService.MountsChanged += OnMountsChanged;
         _ = Services.GetRequiredService<LocalLogService>().InfoAsync("Application launched.");
@@ -63,6 +70,7 @@ public partial class App : Application
         AppTrayService.Initialize(ShowWindow, ShowSettings, ExitApp);
         AppTrayService.Start();
         _ = RestoreConfiguredMountsAsync();
+        _ = ShowBackendAvailabilityIfNeededAsync();
     }
 
     // Closing the window hides it to the tray instead of exiting.
@@ -134,6 +142,22 @@ public partial class App : Application
                 _window.SetExternalStatus($"Failed to restore saved mount point configurations: {string.Join(" | ", failures)}");
                 _ = Services.GetRequiredService<LocalLogService>().ErrorAsync($"Failed to restore saved mount point configurations: {string.Join(" | ", failures)}");
             }
+        });
+    }
+
+    private async Task ShowBackendAvailabilityIfNeededAsync()
+    {
+        if (_window is null) return;
+
+        // Give the window time to fully render before showing a dialog.
+        await Task.Delay(500);
+
+        _window.DispatcherQueue.TryEnqueue(() =>
+        {
+            if (_window is null) return;
+            _ = BackendAvailabilityDialog.ShowIfNeededAsync(
+                _window,
+                () => Services.GetRequiredService<INavigationService>().ShowSettingsPage());
         });
     }
 

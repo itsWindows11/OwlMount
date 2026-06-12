@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Microsoft.UI.Xaml;
+using OwlMount.Core.Windows;
 using OwlMount.WinUI.Services;
 
 namespace OwlMount.WinUI;
@@ -23,9 +24,9 @@ public partial class MainWindowViewModel : ObservableObject
 
     public ObservableCollection<MountEntry> Mounts { get; } = [];
     public ObservableCollection<MountEntry> SelectedMounts { get; } = [];
-    public IReadOnlyList<string> Providers { get; } = ["memory", "archive", "local", "kubo-mfs", "kubo-ipfs", "kubo-ipns", "s3", "nfs"];
-    public IReadOnlyList<string> ProviderDisplayNames { get; } = ["Default provider", "Memory", "Archive file", "Local folder", "Kubo MFS", "Kubo IPFS", "Kubo IPNS", "Amazon S3", "NFS"];
-    public IReadOnlyList<string> Backends { get; } = ["winfsp", "projfs"];
+    public IReadOnlyList<string> Providers { get; } = OwlMountConstants.ProviderIds;
+    public IReadOnlyList<string> ProviderDisplayNames { get; } = [.. OwlMountConstants.ProviderIds.Select(OwlMountConstants.GetProviderDisplayName)];
+    public IReadOnlyList<string> Backends { get; } = OwlMountConstants.BackendIds;
 
     public IAsyncRelayCommand MountCommand { get; }
     public IAsyncRelayCommand AddMountCommand { get; }
@@ -90,12 +91,12 @@ public partial class MainWindowViewModel : ObservableObject
         _s3SecretProvider = s3SecretProvider ?? (() => null);
 
         StatusMessage = string.Empty;
-        SelectedProvider = _settings.GetSetting<string>("DefaultProvider");
-        SelectedBackend = _settings.GetSetting<string>("DefaultBackend");
-        DriveLetters = "M";
+        SelectedProvider = _settings.GetSetting<string>(OwlMountConstants.DefaultProviderSettingKey);
+        SelectedBackend = _settings.GetSetting<string>(OwlMountConstants.DefaultBackendSettingKey);
+        DriveLetters = OwlMountConstants.DefaultDriveLetter;
         ReadOnlyEnabled = true;
         PersistMemoryFsPath = string.Empty;
-        NfsPath = "/";
+        NfsPath = OwlMountConstants.DefaultNfsPath;
         LocalOrArchiveVisibility = Visibility.Visible;
         KuboVisibility = Visibility.Collapsed;
         S3Visibility = Visibility.Collapsed;
@@ -513,7 +514,7 @@ public partial class MainWindowViewModel : ObservableObject
                 S3Endpoint = NullIfBlank(opts.S3Endpoint),
                 NfsHost = NullIfBlank(opts.NfsHost),
                 NfsExport = NullIfBlank(opts.NfsExport),
-                NfsPath = NullIfBlank(opts.NfsPath) ?? "/",
+                NfsPath = NullIfBlank(opts.NfsPath) ?? OwlMountConstants.DefaultNfsPath,
             };
 
             var (success, error) = await _mountService.MountAsync(mountOpts);
@@ -650,33 +651,10 @@ public partial class MainWindowViewModel : ObservableObject
     }
 
     public static string GetProviderDisplayName(string provider) =>
-        provider.ToLowerInvariant() switch
-        {
-            "memory" => "Memory",
-            "archive" => "Archive file",
-            "local" => "Local folder",
-            "kubo-mfs" => "Kubo MFS",
-            "kubo-ipfs" => "Kubo IPFS",
-            "kubo-ipns" => "Kubo IPNS",
-            "s3" => "Amazon S3",
-            "nfs" => "NFS",
-            _ => provider,
-        };
+        OwlMountConstants.GetProviderDisplayName(provider);
 
     private static string? NullIfBlank(string? s) =>
         string.IsNullOrWhiteSpace(s) ? null : s.Trim();
-
-    private string ResolveSelectedProvider() => ResolveProvider(SelectedProvider);
-
-    private string ResolveProvider(string provider)
-    {
-        string normalized = string.IsNullOrWhiteSpace(provider) ? "default" : provider.Trim().ToLowerInvariant();
-        if (normalized != "default")
-            return normalized;
-
-        string configured = _mountService.MountConfigurations.FirstOrDefault()?.Provider ?? _mountService.ActiveMounts.FirstOrDefault()?.Provider ?? "memory";
-        return configured is "default" or "" ? "memory" : configured;
-    }
 
     private static IReadOnlyList<string> ParseDriveLetters(string? raw)
     {

@@ -5,6 +5,7 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Animation;
+using OwlMount.Core.Windows;
 using OwlMount.WinUI.Services;
 using OwlMount.WinUI.Views;
 using Microsoft.UI.Windowing;
@@ -27,7 +28,7 @@ public sealed partial class MainWindow : Window
         ViewModel = app.Services.GetRequiredService<MainWindowViewModel>();
         SettingsViewModel = app.Services.GetRequiredService<SettingsPageViewModel>();
         InitializeComponent();
-        RootGrid.RequestedTheme = AppSettings.GetSetting<Microsoft.UI.Xaml.ElementTheme>("AppTheme");
+        RootGrid.RequestedTheme = AppSettings.GetSetting<Microsoft.UI.Xaml.ElementTheme>(OwlMountConstants.ThemeSettingKey);
         AppSettings.SettingChanged += OnSettingChanged;
         ExtendsContentIntoTitleBar = true;
         SetTitleBar(AppTitleBar);
@@ -49,7 +50,7 @@ public sealed partial class MainWindow : Window
 
     private void OnSettingChanged(object? sender, AppSettingChangedEventArgs e)
     {
-        if (e.Key.Equals("AppTheme", StringComparison.OrdinalIgnoreCase) && e.Value is Microsoft.UI.Xaml.ElementTheme theme)
+        if (e.Key.Equals(OwlMountConstants.ThemeSettingKey, StringComparison.OrdinalIgnoreCase) && e.Value is Microsoft.UI.Xaml.ElementTheme theme)
             RootGrid.RequestedTheme = theme;
     }
 

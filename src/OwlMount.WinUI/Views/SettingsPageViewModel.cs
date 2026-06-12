@@ -4,6 +4,8 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using OwlMount.Core.Windows;
+using OwlMount.Core.Windows.Backends;
 using OwlMount.WinUI.Services;
 using Windows.Storage.Pickers;
 using WinRT.Interop;
@@ -23,8 +25,10 @@ public partial class SettingsPageViewModel : ObservableObject
     private ElementTheme _selectedTheme;
     private long _defaultBlockCacheSizeBytes;
     private bool _enableBlockCache;
-    private string _defaultProvider = "memory";
-    private string _defaultBackend = "winfsp";
+    private string _winFspPath = string.Empty;
+    private string _dokanyPath = string.Empty;
+    private string _defaultProvider = OwlMountConstants.DefaultProvider;
+    private string _defaultBackend = OwlMountConstants.DefaultBackend;
 
     // BlockSizeOption moved to its own file to be resolvable from XAML.
 
@@ -34,10 +38,14 @@ public partial class SettingsPageViewModel : ObservableObject
     public IAsyncRelayCommand ClearAllCacheCommand { get; }
     public IAsyncRelayCommand ExportConfigurationCommand { get; }
     public IAsyncRelayCommand ImportConfigurationCommand { get; }
+    public IAsyncRelayCommand BrowseWinFspPathCommand { get; }
+    public IAsyncRelayCommand BrowseDokanyPathCommand { get; }
+    public IRelayCommand ClearWinFspPathCommand { get; }
+    public IRelayCommand ClearDokanyPathCommand { get; }
 
     public IReadOnlyList<ElementTheme> ThemeOptions { get; } = new[] { ElementTheme.Default, ElementTheme.Light, ElementTheme.Dark };
-    public IReadOnlyList<string> DefaultProviderOptions { get; } = ["memory", "archive", "local", "kubo-mfs", "kubo-ipfs", "kubo-ipns", "s3", "nfs"];
-    public IReadOnlyList<string> DefaultBackendOptions { get; } = ["winfsp", "projfs"];
+    public IReadOnlyList<string> DefaultProviderOptions { get; } = OwlMountConstants.ProviderIds;
+    public IReadOnlyList<string> DefaultBackendOptions { get; } = OwlMountConstants.BackendIds;
     public bool SaveMountConfigurations
     {
         get => _saveMountConfigurations;
@@ -58,7 +66,7 @@ public partial class SettingsPageViewModel : ObservableObject
         {
             if (SetProperty(ref _defaultProvider, value))
             {
-                _settingsService.SetSetting("DefaultProvider", value);
+                _settingsService.SetSetting(OwlMountConstants.DefaultProviderSettingKey, value);
                 _ = _log.InfoAsync($"Default provider changed to {value}.");
             }
         }
@@ -71,7 +79,7 @@ public partial class SettingsPageViewModel : ObservableObject
         {
             if (SetProperty(ref _defaultBackend, value))
             {
-                _settingsService.SetSetting("DefaultBackend", value);
+                _settingsService.SetSetting(OwlMountConstants.DefaultBackendSettingKey, value);
                 _ = _log.InfoAsync($"Default backend changed to {value}.");
             }
         }
@@ -120,7 +128,7 @@ public partial class SettingsPageViewModel : ObservableObject
         {
             if (SetProperty(ref _selectedTheme, value))
             {
-                _settingsService.SetSetting("AppTheme", value);
+                _settingsService.SetSetting(OwlMountConstants.ThemeSettingKey, value);
                 _ = _log.InfoAsync($"Theme changed to {value}.");
             }
         }
@@ -133,7 +141,7 @@ public partial class SettingsPageViewModel : ObservableObject
         {
             if (SetProperty(ref _defaultBlockCacheSizeBytes, value) && value > 0)
             {
-                _settingsService.SetSetting("DefaultBlockCacheSize", value);
+                _settingsService.SetSetting(OwlMountConstants.DefaultBlockCacheSizeSettingKey, value);
                 _ = _log.InfoAsync($"Default block cache size changed to {FormatBytes(value)}.");
             }
         }
@@ -146,8 +154,46 @@ public partial class SettingsPageViewModel : ObservableObject
         {
             if (SetProperty(ref _enableBlockCache, value))
             {
-                _settingsService.SetSetting("EnableBlockCache", value);
+                _settingsService.SetSetting(OwlMountConstants.EnableBlockCacheSettingKey, value);
                 _ = _log.InfoAsync($"Block cache {(value ? "enabled" : "disabled")}.");
+            }
+        }
+    }
+
+    /// <summary>
+    /// Custom directory that contains <c>winfsp-x64.dll</c> (or <c>winfsp-x86.dll</c>).
+    /// Empty string means "use system default search path".
+    /// </summary>
+    public string WinFspPath
+    {
+        get => _winFspPath;
+        set
+        {
+            if (SetProperty(ref _winFspPath, value ?? string.Empty))
+            {
+                string? path = string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+                _settingsService.SetWinFspPath(path);
+                WinFspBackend.SetCustomPath(path);
+                _ = _log.InfoAsync($"WinFsp path set to: {path ?? "(default)"}.");
+            }
+        }
+    }
+
+    /// <summary>
+    /// Custom directory that contains <c>dokan2.dll</c> (or <c>dokan1.dll</c>).
+    /// Empty string means "use system default search path".
+    /// </summary>
+    public string DokanyPath
+    {
+        get => _dokanyPath;
+        set
+        {
+            if (SetProperty(ref _dokanyPath, value ?? string.Empty))
+            {
+                string? path = string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+                _settingsService.SetDokanyPath(path);
+                DokanyBackend.SetCustomPath(path);
+                _ = _log.InfoAsync($"Dokany path set to: {path ?? "(default)"}.");
             }
         }
     }
@@ -170,16 +216,22 @@ public partial class SettingsPageViewModel : ObservableObject
         ClearAllCacheCommand = new AsyncRelayCommand(ClearAllCacheAsync);
         ExportConfigurationCommand = new AsyncRelayCommand(ExportConfigurationAsync);
         ImportConfigurationCommand = new AsyncRelayCommand(ImportConfigurationAsync);
+        BrowseWinFspPathCommand = new AsyncRelayCommand(BrowseWinFspPathAsync);
+        BrowseDokanyPathCommand = new AsyncRelayCommand(BrowseDokanyPathAsync);
+        ClearWinFspPathCommand = new RelayCommand(() => { WinFspPath = string.Empty; });
+        ClearDokanyPathCommand = new RelayCommand(() => { DokanyPath = string.Empty; });
 
-        _selectedTheme = _settingsService.GetSetting<ElementTheme>("AppTheme");
-        _defaultBlockCacheSizeBytes = _settingsService.GetSetting<long>("DefaultBlockCacheSize");
-        _enableBlockCache = _settingsService.GetSetting<bool>("EnableBlockCache");
-        _defaultProvider = _settingsService.GetSetting<string>("DefaultProvider");
-        _defaultBackend = _settingsService.GetSetting<string>("DefaultBackend");
+        _selectedTheme = _settingsService.GetSetting<ElementTheme>(OwlMountConstants.ThemeSettingKey);
+        _defaultBlockCacheSizeBytes = _settingsService.GetSetting<long>(OwlMountConstants.DefaultBlockCacheSizeSettingKey);
+        _enableBlockCache = _settingsService.GetSetting<bool>(OwlMountConstants.EnableBlockCacheSettingKey);
+        _defaultProvider = _settingsService.GetSetting<string>(OwlMountConstants.DefaultProviderSettingKey);
+        _defaultBackend = _settingsService.GetSetting<string>(OwlMountConstants.DefaultBackendSettingKey);
         _saveMountConfigurations = _mountService.SaveMountPointConfigurations;
         _persistMemoryFsOnExit = _mountService.PersistMemoryFileSystemOnExit;
         _persistMemoryFsPath = _mountService.MemoryFileSystemPersistPath;
         _isPersistMemoryFsPathEnabled = _persistMemoryFsOnExit;
+        _winFspPath = _settingsService.WinFspPath ?? string.Empty;
+        _dokanyPath = _settingsService.DokanyPath ?? string.Empty;
         BlockCacheSizeOptions =
         [
             new BlockSizeOption(65536, "64 KiB"),
@@ -195,10 +247,10 @@ public partial class SettingsPageViewModel : ObservableObject
             DefaultBlockCacheSizeBytes = 262144;
 
         if (!DefaultProviderOptions.Contains(_defaultProvider))
-            DefaultProvider = "memory";
+            DefaultProvider = OwlMountConstants.DefaultProvider;
 
         if (!DefaultBackendOptions.Contains(_defaultBackend))
-            DefaultBackend = "winfsp";
+            DefaultBackend = OwlMountConstants.DefaultBackend;
     }
 
     public void SetWindowProvider(Func<Window?> windowProvider) => _windowProvider = windowProvider;
@@ -353,6 +405,42 @@ public partial class SettingsPageViewModel : ObservableObject
         >= 1024               => $"{bytes / 1024.0:F1} KB",
         _                     => $"{bytes} B",
     };
+
+    private async Task BrowseWinFspPathAsync()
+    {
+        Window? window = _windowProvider();
+        if (window is null) return;
+
+        _ = _log.InfoAsync("Browsing for WinFsp path.");
+        var picker = new FolderPicker();
+        picker.FileTypeFilter.Add("*");
+        InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(window));
+
+        var folder = await picker.PickSingleFolderAsync();
+        if (folder is not null)
+        {
+            WinFspPath = folder.Path;
+            _ = _log.InfoAsync($"Selected WinFsp path: {folder.Path}");
+        }
+    }
+
+    private async Task BrowseDokanyPathAsync()
+    {
+        Window? window = _windowProvider();
+        if (window is null) return;
+
+        _ = _log.InfoAsync("Browsing for Dokany path.");
+        var picker = new FolderPicker();
+        picker.FileTypeFilter.Add("*");
+        InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(window));
+
+        var folder = await picker.PickSingleFolderAsync();
+        if (folder is not null)
+        {
+            DokanyPath = folder.Path;
+            _ = _log.InfoAsync($"Selected Dokany path: {folder.Path}");
+        }
+    }
 
     private async Task BrowseExportPathAsync()
     {

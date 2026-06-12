@@ -1,5 +1,6 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using OwlMount.Core.Windows;
 using OwlMount.WinUI.Services;
 using Windows.Storage.Pickers;
 using WinRT.Interop;
@@ -15,8 +16,8 @@ public sealed partial class MountConfigDialog : UserControl
     public MountConfigDialog()
     {
         InitializeComponent();
-        BackendBox.ItemsSource = new[] { "winfsp", "projfs" };
-        ProviderBox.ItemsSource = new[] { "default", "memory", "archive", "local", "kubo-mfs", "kubo-ipfs", "kubo-ipns", "s3", "nfs" };
+        BackendBox.ItemsSource = OwlMountConstants.BackendIds;
+        ProviderBox.ItemsSource = OwlMountConstants.ProviderIds;
     }
 
     public void Initialize(Window window, ProviderOptions? existing = null)
@@ -24,8 +25,8 @@ public sealed partial class MountConfigDialog : UserControl
         _window = window;
         var app = (App)Application.Current;
         var settings = app.Services.GetRequiredService<AppSettingsService>();
-        string defaultProvider = settings.GetSetting<string>("DefaultProvider");
-        string defaultBackend = settings.GetSetting<string>("DefaultBackend");
+        string defaultProvider = settings.GetSetting<string>(OwlMountConstants.DefaultProviderSettingKey);
+        string defaultBackend = settings.GetSetting<string>(OwlMountConstants.DefaultBackendSettingKey);
 
         // Compute free RAM (in MiB) for the memory size slider ceiling.
         ulong availBytes = NativeMethods.GetAvailablePhysicalMemory();
@@ -60,7 +61,7 @@ public sealed partial class MountConfigDialog : UserControl
         EndpointBox.Text = existing?.S3Endpoint ?? string.Empty;
         NfsHostBox.Text = existing?.NfsHost ?? string.Empty;
         NfsExportBox.Text = existing?.NfsExport ?? string.Empty;
-        NfsPathBox.Text = existing?.NfsPath ?? "/";
+        NfsPathBox.Text = existing?.NfsPath ?? OwlMountConstants.DefaultNfsPath;
 
         // Initialize block cache settings
         string enableBlockCacheText = existing?.EnableBlockCache switch
@@ -90,7 +91,7 @@ public sealed partial class MountConfigDialog : UserControl
 
     public ProviderOptions GetOptions()
     {
-        string provider = (ProviderBox.SelectedItem as string) ?? "default";
+        string provider = (ProviderBox.SelectedItem as string) ?? OwlMountConstants.DefaultProvider;
         long? memorySizeLimit = provider == "memory"
             ? (long)MemorySizeSlider.Value * 1024 * 1024
             : null;
@@ -118,7 +119,7 @@ public sealed partial class MountConfigDialog : UserControl
         return new()
         {
             Provider = provider,
-            Backend = (BackendBox.SelectedItem as string) ?? "winfsp",
+            Backend = (BackendBox.SelectedItem as string) ?? OwlMountConstants.DefaultBackend,
             Letter = NormalizeDriveLetter(LetterBox.SelectedItem as string) ?? string.Empty,
             Label = string.IsNullOrWhiteSpace(LabelBox.Text) ? null : LabelBox.Text.Trim(),
             MemorySizeLimitBytes = memorySizeLimit,
@@ -137,7 +138,7 @@ public sealed partial class MountConfigDialog : UserControl
             S3Endpoint = string.IsNullOrWhiteSpace(EndpointBox.Text) ? null : EndpointBox.Text.Trim(),
             NfsHost = string.IsNullOrWhiteSpace(NfsHostBox.Text) ? null : NfsHostBox.Text.Trim(),
             NfsExport = string.IsNullOrWhiteSpace(NfsExportBox.Text) ? null : NfsExportBox.Text.Trim(),
-            NfsPath = string.IsNullOrWhiteSpace(NfsPathBox.Text) ? "/" : NfsPathBox.Text.Trim(),
+            NfsPath = string.IsNullOrWhiteSpace(NfsPathBox.Text) ? OwlMountConstants.DefaultNfsPath : NfsPathBox.Text.Trim(),
         };
     }
 
@@ -171,7 +172,7 @@ public sealed partial class MountConfigDialog : UserControl
 
     private void UpdateVisibility()
     {
-        string provider = (ProviderBox.SelectedItem as string) ?? "memory";
+        string provider = (ProviderBox.SelectedItem as string) ?? OwlMountConstants.DefaultProvider;
         MemorySection.Visibility = provider == "memory" ? Visibility.Visible : Visibility.Collapsed;
         LocalArchiveSection.Visibility = provider is "local" or "archive" ? Visibility.Visible : Visibility.Collapsed;
         KuboSection.Visibility = provider.StartsWith("kubo-", StringComparison.OrdinalIgnoreCase) ? Visibility.Visible : Visibility.Collapsed;

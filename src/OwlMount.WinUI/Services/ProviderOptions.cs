@@ -1,3 +1,5 @@
+using OwlMount.Core.Windows;
+
 namespace OwlMount.WinUI.Services;
 
 /// <summary>
@@ -5,9 +7,9 @@ namespace OwlMount.WinUI.Services;
 /// </summary>
 public sealed class ProviderOptions
 {
-    public string Provider { get; init; } = "default";
-    public string Backend { get; init; } = "winfsp";
-    public string Letter { get; init; } = "M";
+    public string Provider { get; init; } = OwlMountConstants.DefaultProvider;
+    public string Backend { get; init; } = OwlMountConstants.DefaultBackend;
+    public string Letter { get; init; } = OwlMountConstants.DefaultDriveLetter;
     public string? Label { get; init; }
     public bool ForceReadOnly { get; init; }
 
@@ -50,5 +52,5 @@ public sealed class ProviderOptions
     // NFS
     public string? NfsHost { get; init; }
     public string? NfsExport { get; init; }
-    public string NfsPath { get; init; } = "/";
+    public string NfsPath { get; init; } = OwlMountConstants.DefaultNfsPath;
 }

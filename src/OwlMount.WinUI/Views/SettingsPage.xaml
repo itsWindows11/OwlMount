@@ -105,6 +105,52 @@
                 Text="Advanced" />
 
             <controls:SettingsExpander
+                Description="Custom installation directories for third-party VFS backends."
+                Header="Backend paths"
+                IsExpanded="False">
+                <controls:SettingsExpander.Items>
+                    <controls:SettingsCard
+                        Description="Directory containing winfsp-x64.dll or winfsp-x86.dll."
+                        Header="WinFsp path">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <TextBox
+                                x:Name="WinFspPathBox"
+                                MaxWidth="256"
+                                PlaceholderText="Default system location"
+                                Text="{x:Bind ViewModel.WinFspPath, Mode=TwoWay}" />
+                            <Button
+                                AutomationProperties.Name="Browse WinFsp path"
+                                Command="{x:Bind ViewModel.BrowseWinFspPathCommand}"
+                                Content="Browse" />
+                            <Button
+                                AutomationProperties.Name="Clear WinFsp path"
+                                Command="{x:Bind ViewModel.ClearWinFspPathCommand}"
+                                Content="Clear" />
+                        </StackPanel>
+                    </controls:SettingsCard>
+                    <controls:SettingsCard
+                        Description="Directory containing dokan2.dll or dokan1.dll."
+                        Header="Dokany path">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <TextBox
+                                x:Name="DokanyPathBox"
+                                MaxWidth="256"
+                                PlaceholderText="Default system location"
+                                Text="{x:Bind ViewModel.DokanyPath, Mode=TwoWay}" />
+                            <Button
+                                AutomationProperties.Name="Browse Dokany path"
+                                Command="{x:Bind ViewModel.BrowseDokanyPathCommand}"
+                                Content="Browse" />
+                            <Button
+                                AutomationProperties.Name="Clear Dokany path"
+                                Command="{x:Bind ViewModel.ClearDokanyPathCommand}"
+                                Content="Clear" />
+                        </StackPanel>
+                    </controls:SettingsCard>
+                </controls:SettingsExpander.Items>
+            </controls:SettingsExpander>
+
+            <controls:SettingsExpander
                 Description="Maintenance actions for cached and residual data."
                 Header="Cache &amp; residue"
                 IsExpanded="False">
