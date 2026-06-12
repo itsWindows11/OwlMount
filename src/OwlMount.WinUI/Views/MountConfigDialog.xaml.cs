@@ -3,6 +3,7 @@ using Microsoft.UI.Xaml.Controls;
 using OwlMount.WinUI.Services;
 using Windows.Storage.Pickers;
 using WinRT.Interop;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace OwlMount.WinUI.Views;
 
@@ -15,12 +16,16 @@ public sealed partial class MountConfigDialog : UserControl
     {
         InitializeComponent();
         BackendBox.ItemsSource = new[] { "winfsp", "projfs" };
-        ProviderBox.ItemsSource = new[] { "memory", "archive", "local", "kubo-mfs", "kubo-ipfs", "kubo-ipns", "s3", "nfs" };
+        ProviderBox.ItemsSource = new[] { "default", "memory", "archive", "local", "kubo-mfs", "kubo-ipfs", "kubo-ipns", "s3", "nfs" };
     }
 
     public void Initialize(Window window, ProviderOptions? existing = null)
     {
         _window = window;
+        var app = (App)Application.Current;
+        var settings = app.Services.GetRequiredService<AppSettingsService>();
+        string defaultProvider = settings.GetSetting<string>("DefaultProvider");
+        string defaultBackend = settings.GetSetting<string>("DefaultBackend");
 
         // Compute free RAM (in MiB) for the memory size slider ceiling.
         ulong availBytes = NativeMethods.GetAvailablePhysicalMemory();
@@ -35,9 +40,9 @@ public sealed partial class MountConfigDialog : UserControl
         MemorySizeSlider.Value = Math.Clamp(defaultMb, 64, _maxMemoryMb);
         UpdateMemorySizeLabel();
 
-        ProviderBox.SelectedItem = existing?.Provider ?? "memory";
+        ProviderBox.SelectedItem = existing?.Provider ?? defaultProvider;
         ProviderBox.IsEnabled = existing is null;
-        BackendBox.SelectedItem = existing?.Backend ?? "winfsp";
+        BackendBox.SelectedItem = existing?.Backend ?? defaultBackend;
         BackendBox.IsEnabled = existing is null;
         RefreshDriveLetterChoices(existing?.Letter);
         LetterBox.SelectedItem = NormalizeDriveLetter(existing?.Letter) ?? LetterBox.Items.FirstOrDefault() as string;
@@ -85,7 +90,7 @@ public sealed partial class MountConfigDialog : UserControl
 
     public ProviderOptions GetOptions()
     {
-        string provider = (ProviderBox.SelectedItem as string) ?? "memory";
+        string provider = (ProviderBox.SelectedItem as string) ?? "default";
         long? memorySizeLimit = provider == "memory"
             ? (long)MemorySizeSlider.Value * 1024 * 1024
             : null;

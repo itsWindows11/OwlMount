@@ -23,6 +23,8 @@ public partial class SettingsPageViewModel : ObservableObject
     private ElementTheme _selectedTheme;
     private long _defaultBlockCacheSizeBytes;
     private bool _enableBlockCache;
+    private string _defaultProvider = "memory";
+    private string _defaultBackend = "winfsp";
 
     // BlockSizeOption moved to its own file to be resolvable from XAML.
 
@@ -34,7 +36,8 @@ public partial class SettingsPageViewModel : ObservableObject
     public IAsyncRelayCommand ImportConfigurationCommand { get; }
 
     public IReadOnlyList<ElementTheme> ThemeOptions { get; } = new[] { ElementTheme.Default, ElementTheme.Light, ElementTheme.Dark };
-
+    public IReadOnlyList<string> DefaultProviderOptions { get; } = ["memory", "archive", "local", "kubo-mfs", "kubo-ipfs", "kubo-ipns", "s3", "nfs"];
+    public IReadOnlyList<string> DefaultBackendOptions { get; } = ["winfsp", "projfs"];
     public bool SaveMountConfigurations
     {
         get => _saveMountConfigurations;
@@ -44,6 +47,32 @@ public partial class SettingsPageViewModel : ObservableObject
             {
                 _mountService.SetSaveMountPointConfigurations(value);
                 _ = _log.InfoAsync($"Save mount configurations set to {value}.");
+            }
+        }
+    }
+
+    public string DefaultProvider
+    {
+        get => _defaultProvider;
+        set
+        {
+            if (SetProperty(ref _defaultProvider, value))
+            {
+                _settingsService.SetSetting("DefaultProvider", value);
+                _ = _log.InfoAsync($"Default provider changed to {value}.");
+            }
+        }
+    }
+
+    public string DefaultBackend
+    {
+        get => _defaultBackend;
+        set
+        {
+            if (SetProperty(ref _defaultBackend, value))
+            {
+                _settingsService.SetSetting("DefaultBackend", value);
+                _ = _log.InfoAsync($"Default backend changed to {value}.");
             }
         }
     }
@@ -91,7 +120,7 @@ public partial class SettingsPageViewModel : ObservableObject
         {
             if (SetProperty(ref _selectedTheme, value))
             {
-                _settingsService.SetTheme(value);
+                _settingsService.SetSetting("AppTheme", value);
                 _ = _log.InfoAsync($"Theme changed to {value}.");
             }
         }
@@ -104,7 +133,7 @@ public partial class SettingsPageViewModel : ObservableObject
         {
             if (SetProperty(ref _defaultBlockCacheSizeBytes, value) && value > 0)
             {
-                _settingsService.SetDefaultBlockCacheSize(value);
+                _settingsService.SetSetting("DefaultBlockCacheSize", value);
                 _ = _log.InfoAsync($"Default block cache size changed to {FormatBytes(value)}.");
             }
         }
@@ -117,7 +146,7 @@ public partial class SettingsPageViewModel : ObservableObject
         {
             if (SetProperty(ref _enableBlockCache, value))
             {
-                _settingsService.SetEnableBlockCache(value);
+                _settingsService.SetSetting("EnableBlockCache", value);
                 _ = _log.InfoAsync($"Block cache {(value ? "enabled" : "disabled")}.");
             }
         }
@@ -142,9 +171,11 @@ public partial class SettingsPageViewModel : ObservableObject
         ExportConfigurationCommand = new AsyncRelayCommand(ExportConfigurationAsync);
         ImportConfigurationCommand = new AsyncRelayCommand(ImportConfigurationAsync);
 
-        _selectedTheme = _settingsService.Theme;
-        _defaultBlockCacheSizeBytes = _settingsService.DefaultBlockCacheSizeBytes;
-        _enableBlockCache = _settingsService.EnableBlockCache;
+        _selectedTheme = _settingsService.GetSetting<ElementTheme>("AppTheme");
+        _defaultBlockCacheSizeBytes = _settingsService.GetSetting<long>("DefaultBlockCacheSize");
+        _enableBlockCache = _settingsService.GetSetting<bool>("EnableBlockCache");
+        _defaultProvider = _settingsService.GetSetting<string>("DefaultProvider");
+        _defaultBackend = _settingsService.GetSetting<string>("DefaultBackend");
         _saveMountConfigurations = _mountService.SaveMountPointConfigurations;
         _persistMemoryFsOnExit = _mountService.PersistMemoryFileSystemOnExit;
         _persistMemoryFsPath = _mountService.MemoryFileSystemPersistPath;
@@ -162,6 +193,12 @@ public partial class SettingsPageViewModel : ObservableObject
         // Ensure selected value matches one of the options; if not, default to 256 KiB
         if (!BlockCacheSizeOptions.Any(o => o.Bytes == _defaultBlockCacheSizeBytes))
             DefaultBlockCacheSizeBytes = 262144;
+
+        if (!DefaultProviderOptions.Contains(_defaultProvider))
+            DefaultProvider = "memory";
+
+        if (!DefaultBackendOptions.Contains(_defaultBackend))
+            DefaultBackend = "winfsp";
     }
 
     public void SetWindowProvider(Func<Window?> windowProvider) => _windowProvider = windowProvider;

@@ -138,14 +138,14 @@ public sealed class MountService : IDisposable
         if (normalizedOpts.Provider is not ("memory" or "archive" or "local"))
         {
             // Determine if block cache should be enabled
-            bool blockCacheEnabled = normalizedOpts.EnableBlockCache ?? 
-                _appSettings.EnableBlockCache;
+                bool blockCacheEnabled = normalizedOpts.EnableBlockCache ??
+                    _appSettings.GetSetting<bool>("EnableBlockCache");
 
             if (blockCacheEnabled)
             {
                 // Determine block cache size: per-mount overrides global
-                long blockCacheSize = normalizedOpts.BlockCacheSizeBytes ?? 
-                    _appSettings.DefaultBlockCacheSizeBytes;
+                long blockCacheSize = normalizedOpts.BlockCacheSizeBytes ??
+                    _appSettings.GetSetting<long>("DefaultBlockCacheSize");
 
                 blockCache = new BlockCache(
                     providerId: $"{normalizedOpts.Provider}_{pr.Root.Id}",
@@ -706,6 +706,8 @@ public sealed class MountService : IDisposable
             SaveMountPointConfigurations = state.SaveMountPointConfigurations;
             PersistMemoryFileSystemOnExit = state.PersistMemoryFileSystemOnExit;
             MemoryFileSystemPersistPath = NormalizePersistPath(state.MemoryFileSystemPersistPath);
+            _appSettings.SetSetting("DefaultProvider", state.DefaultProvider);
+            _appSettings.SetSetting("DefaultBackend", state.DefaultBackend);
             _mountConfigurations.Clear();
 
             foreach (ProviderOptions opts in state.MountPoints)
@@ -735,6 +737,8 @@ public sealed class MountService : IDisposable
                     SaveMountPointConfigurations = SaveMountPointConfigurations,
                     PersistMemoryFileSystemOnExit = PersistMemoryFileSystemOnExit,
                     MemoryFileSystemPersistPath = MemoryFileSystemPersistPath,
+                    DefaultProvider = _appSettings.GetSetting<string>("DefaultProvider"),
+                    DefaultBackend = _appSettings.GetSetting<string>("DefaultBackend"),
                     MountPoints = SaveMountPointConfigurations
                         ? [.. _mountConfigurations.Values]
                         : [],
@@ -772,6 +776,8 @@ public sealed class MountService : IDisposable
                     SaveMountPointConfigurations = SaveMountPointConfigurations,
                     PersistMemoryFileSystemOnExit = PersistMemoryFileSystemOnExit,
                     MemoryFileSystemPersistPath = MemoryFileSystemPersistPath,
+                    DefaultProvider = _appSettings.GetSetting<string>("DefaultProvider"),
+                    DefaultBackend = _appSettings.GetSetting<string>("DefaultBackend"),
                     MountPoints = [.. _mountConfigurations.Values],
                 };
             }
@@ -813,6 +819,7 @@ public sealed class MountService : IDisposable
                     SaveMountPointConfigurations = state.SaveMountPointConfigurations;
                     PersistMemoryFileSystemOnExit = state.PersistMemoryFileSystemOnExit;
                     MemoryFileSystemPersistPath = NormalizePersistPath(state.MemoryFileSystemPersistPath);
+                    _appSettings.SetSetting("DefaultProvider", state.DefaultProvider);
                 }
 
                 if (importMountPoints && state.MountPoints.Count > 0)
@@ -844,6 +851,8 @@ internal sealed class MountConfigurationState
     public bool SaveMountPointConfigurations { get; init; } = true;
     public bool PersistMemoryFileSystemOnExit { get; init; }
     public string? MemoryFileSystemPersistPath { get; init; }
+    public string DefaultProvider { get; init; } = "memory";
+    public string DefaultBackend { get; init; } = "winfsp";
     public List<ProviderOptions> MountPoints { get; init; } = [];
 }
 

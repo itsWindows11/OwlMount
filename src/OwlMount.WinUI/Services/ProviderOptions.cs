@@ -5,7 +5,7 @@ namespace OwlMount.WinUI.Services;
 /// </summary>
 public sealed class ProviderOptions
 {
-    public string Provider { get; init; } = "memory";
+    public string Provider { get; init; } = "default";
     public string Backend { get; init; } = "winfsp";
     public string Letter { get; init; } = "M";
     public string? Label { get; init; }

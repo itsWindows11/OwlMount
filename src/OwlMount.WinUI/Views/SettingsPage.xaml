@@ -53,6 +53,24 @@
                     IsOn="{x:Bind ViewModel.SaveMountConfigurations, Mode=TwoWay}" />
             </controls:SettingsCard>
 
+            <controls:SettingsCard Header="Default provider">
+                <ComboBox
+                    Width="180"
+                    HorizontalAlignment="Right"
+                    AutomationProperties.Name="Default provider"
+                    ItemsSource="{x:Bind ViewModel.DefaultProviderOptions, Mode=OneWay}"
+                    SelectedItem="{x:Bind ViewModel.DefaultProvider, Mode=TwoWay}" />
+            </controls:SettingsCard>
+
+            <controls:SettingsCard Header="Default backend">
+                <ComboBox
+                    Width="180"
+                    HorizontalAlignment="Right"
+                    AutomationProperties.Name="Default backend"
+                    ItemsSource="{x:Bind ViewModel.DefaultBackendOptions, Mode=OneWay}"
+                    SelectedItem="{x:Bind ViewModel.DefaultBackend, Mode=TwoWay}" />
+            </controls:SettingsCard>
+
             <controls:SettingsExpander
                 Description="Export memory-based files on exit."
                 Header="In-memory filesystem export"
