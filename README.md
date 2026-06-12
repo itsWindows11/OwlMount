@@ -6,21 +6,21 @@ Windows drive letter. Three filesystem backends are available:
 
 | Backend | Flag | Description |
 |---|---|---|
-| **WinFsp** *(default)* | `--backend winfsp` | Full read-write support via the [WinFsp](https://winfsp.dev/) user-mode driver |
-| **Dokany** | `--backend dokany` | Full read-write support via the [Dokany](https://github.com/dokan-dev/dokany) user-mode driver |
+| **Dokany** *(default)* | `--backend dokany` | Full read-write support via the [Dokany](https://github.com/dokan-dev/dokany) user-mode driver |
+| **WinFsp** | `--backend winfsp` | Full read-write support via the [WinFsp](https://winfsp.dev/) user-mode driver |
 | **ProjFS** | `--backend projfs` | Read-only; uses the built-in [Windows Projected File System](https://learn.microsoft.com/en-us/windows/win32/projfs/projected-file-system) — no additional installs required |
 
 ## Features
 
 * **WinUI 3 GUI** — full-featured desktop app with per-mount cards, selection overlay, and system-tray integration
-* **Multi-backend** — choose WinFsp or Dokany for read-write, or ProjFS for zero-install read-only
+* **Multi-backend** — choose Dokany or WinFsp for read-write, or ProjFS for zero-install read-only
 * **Backend abstraction layer** — `IOwlMountBackend` interface separates mount logic from the UI/CLI
-* **Read-write support** (WinFsp) — create, write, rename, and delete files/folders
+* **Read-write support** (Dokany) — create, write, rename, and delete files/folders
 * **Read-only support** (ProjFS / `--read-only` flag)
 * **Block cache** — 256 KiB blocks persisted to disk under `%LocalAppData%\OwlMount\Cache\` to avoid re-downloading data
 * **Adapter registry** — plug in custom `IRangeReader` / `ISizeProvider` implementations without touching core VFS logic
 * **Path index** — in-memory normalized-path → entry map populated during directory enumeration
-* **Directory cache** (WinFsp) — short TTL (15 s default) per-folder listing cache; invalidated automatically on write operations
+* **Directory cache** (Dokany) — short TTL (15 s default) per-folder listing cache; invalidated automatically on write operations
 * **In-memory provider** — zero-config drive backed by `OwlCore.Storage.Memory`; configurable RAM size limit
 * **Archive provider** — mount any `.zip`, `.tar`, `.rar`, etc. file read-only
 
@@ -28,19 +28,19 @@ Windows drive letter. Three filesystem backends are available:
 
 ### GUI/WinUI 3 app
 
-![The OwlMount WinUI 3 app in action](./media/owlmount-gui-poc.mp4)
+<video controls loop muted playsinline width="100%" src="./media/owlmount-gui-poc.mp4"></video>
 
 ### CLI app
 
-![The OwlMount CLI app in action](./media/owlmount-cli-poc.mp4)
+<video controls loop muted playsinline width="100%" src="./media/owlmount-cli-poc.mp4"></video>
 
 ## Prerequisites
 
 1. **.NET 10 SDK** — <https://dot.net>
 2. **Windows 10 version 1809 (build 17763) or later**
 3. Backend-specific requirements:
-   - **WinFsp** (default): [install WinFsp](https://winfsp.dev/rel/) — a fast, signed, free user-mode filesystem driver
-   - **Dokany**: [install Dokany](https://github.com/dokan-dev/dokany/releases)
+   - **Dokany** (default): [install Dokany](https://github.com/dokan-dev/dokany/releases) — a fast, signed, free user-mode filesystem driver
+   - **WinFsp**: [install WinFsp](https://winfsp.dev/rel/) — a fast, signed, free user-mode filesystem driver
    - **ProjFS**: enable the optional Windows feature (run once in an elevated PowerShell prompt):
      ```powershell
      Enable-WindowsOptionalFeature -Online -FeatureName Client-ProjFS -NoRestart
@@ -123,7 +123,7 @@ Pressing **Ctrl+C**, running `owlmount unmount --letter <X>` from another termin
 >
 > **OneDrive** is supported as a code-level provider (`OneDriveFolder` / `OneDriveFile` from `OwlCore.Storage.OneDrive`) but requires a pre-authenticated `GraphServiceClient` from MSAL — see *Adding a custom provider* below.
 
-### Example — empty in-memory filesystem as `R:` (WinFsp, read-write)
+### Example — empty in-memory filesystem as `R:` (Dokany, read-write)
 
 ```bat
 owlmount mount --provider memory --letter R --label "RAM Drive"
