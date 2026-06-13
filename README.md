@@ -72,7 +72,6 @@ dotnet run --project src/OwlMount.WinUI/OwlMount.WinUI.csproj
 * **System tray** — closing the window hides to tray; right-click the icon for **Open OwlMount**, **Settings**, per-drive **Unmount**, or **Exit**
 * **Settings page** (reachable from the title bar button, `ShowSettingsCommand`, or tray **Settings**):
   - **Theme** — Default / Light / Dark
-  - **Mount configuration persistence** — save mount points across restarts
   - **In-memory filesystem export** — export RAM-drive contents to a folder on exit
   - **Maintenance — Clear disk cache** — deletes all block-cache files under `%LocalAppData%\OwlMount\Cache\`; frees space used by remote provider caches
   - **Maintenance — Clear ProjFS residue** — deletes leftover virtualisation-root directories under `%LocalAppData%\OwlMount\VirtRoot\` from drives that are no longer mounted

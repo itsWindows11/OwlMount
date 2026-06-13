@@ -29,6 +29,27 @@
             <TextBlock
                 Margin="0,12,0,4"
                 FontWeight="SemiBold"
+                Text="Startup" />
+
+            <controls:SettingsCard Header="Run on Windows startup">
+                <ToggleSwitch
+                    HorizontalAlignment="Right"
+                    AutomationProperties.Name="Run on Windows startup"
+                    IsOn="{x:Bind ViewModel.RunOnWindowsStartup, Mode=TwoWay}" />
+            </controls:SettingsCard>
+
+            <controls:SettingsCard
+                Description="Keep mount configurations saved so OwlMount can restore them when it starts."
+                Header="Restore mounts on app startup">
+                <ToggleSwitch
+                    HorizontalAlignment="Right"
+                    AutomationProperties.Name="Restore mounts on app startup"
+                    IsOn="{x:Bind ViewModel.SaveMountConfigurations, Mode=TwoWay}" />
+            </controls:SettingsCard>
+
+            <TextBlock
+                Margin="0,12,0,4"
+                FontWeight="SemiBold"
                 Text="General" />
 
             <controls:SettingsCard Header="Theme">
@@ -44,13 +65,6 @@
                         </DataTemplate>
                     </ComboBox.ItemTemplate>
                 </ComboBox>
-            </controls:SettingsCard>
-
-            <controls:SettingsCard Header="Mount configuration persistence">
-                <ToggleSwitch
-                    HorizontalAlignment="Right"
-                    AutomationProperties.Name="Mount configuration persistence"
-                    IsOn="{x:Bind ViewModel.SaveMountConfigurations, Mode=TwoWay}" />
             </controls:SettingsCard>
 
             <controls:SettingsCard Header="Default provider">
