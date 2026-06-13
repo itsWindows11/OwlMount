@@ -1,8 +1,11 @@
 using System.Collections.Generic;
+using System.IO.Compression;
 using System.Runtime.Versioning;
 using System.Threading;
 using OwlCore.Storage;
+using OwlCore.Storage.SharpCompress;
 using OwlCore.Storage.Memory;
+using OwlCore.Storage.System.IO;
 using OwlMount.Core.Cache;
 using OwlMount.Core.Registry;
 using OwlMount.Core.Windows.Backends;
@@ -210,55 +213,158 @@ public sealed class BackendTests : IDisposable
     // ── Memory provider tests ────────────────────────────────────────────────
 
     [Fact]
-    public async Task MemoryProvider_CanCreateFoldersAndWriteThenReadBackFiles()
+    public async Task MemoryProvider_WinFsp_CanMount_AndReadWriteViaSystemIO()
     {
-        var root = new MemoryFolder("memory-root", "memory-root");
-        var docs = (IModifiableFolder)await root.CreateFolderAsync("docs", overwrite: false);
-        var file = (IFile)await docs.CreateFileAsync("hello.txt", overwrite: false);
+        if (!IsWindows() || !WinFspBackend.IsAvailable()) return;
 
-        const string expected = "hello from memory";
-        await using (Stream stream = await file.OpenStreamAsync(FileAccess.Write))
-        {
-            byte[] bytes = System.Text.Encoding.UTF8.GetBytes(expected);
-            await stream.WriteAsync(bytes);
-        }
+        using var backend = MakeWinFsp(root: new MemoryFolder("memory-root", "memory-root"));
+        await using var mount = await MountBackendAsync(backend);
 
-        var folder = (IFolder)await root.GetFirstByNameAsync("docs");
-        var roundTrip = (IFile)await folder.GetFirstByNameAsync("hello.txt");
-        await using Stream readStream = await roundTrip.OpenStreamAsync(FileAccess.Read);
-        using var reader = new StreamReader(readStream, System.Text.Encoding.UTF8);
+        string rootPath = mount.MountPoint + Path.DirectorySeparatorChar;
+        string docsPath = Path.Combine(rootPath, "docs");
+        string filePath = Path.Combine(docsPath, "hello.txt");
 
-        Assert.Equal(expected, await reader.ReadToEndAsync());
+        Directory.CreateDirectory(docsPath);
+        await File.WriteAllTextAsync(filePath, "hello from memory");
+
+        Assert.True(Directory.Exists(docsPath));
+        Assert.Equal("hello from memory", await File.ReadAllTextAsync(filePath));
+    }
+
+    [Fact]
+    public async Task ArchiveProvider_WinFsp_CanMount_AndReadViaSystemIO()
+    {
+        if (!IsWindows() || !WinFspBackend.IsAvailable()) return;
+
+        string archivePath = CreateZipArchive("sample.zip", [("readme.txt", "archive content")]);
+        var root = new ArchiveFolder(new SystemFile(archivePath));
+        using var backend = MakeWinFsp(root, readOnly: true);
+        await using var mount = await MountBackendAsync(backend);
+
+        string filePath = Path.Combine(mount.MountPoint, "readme.txt");
+        Assert.Equal("archive content", await File.ReadAllTextAsync(filePath));
+        Assert.True(File.GetAttributes(filePath).HasFlag(FileAttributes.ReadOnly));
+    }
+
+    [Fact]
+    public async Task MemoryProvider_Dokany_CanMount_AndReadWriteViaSystemIO()
+    {
+        if (!IsWindows() || !DokanyBackend.IsAvailable()) return;
+
+        using var backend = MakeDokany(root: new MemoryFolder("memory-root", "memory-root"));
+        await using var mount = await MountBackendAsync(backend);
+
+        string rootPath = mount.MountPoint + Path.DirectorySeparatorChar;
+        string docsPath = Path.Combine(rootPath, "docs");
+        string filePath = Path.Combine(docsPath, "hello.txt");
+
+        Directory.CreateDirectory(docsPath);
+        await File.WriteAllTextAsync(filePath, "hello from memory");
+
+        Assert.True(Directory.Exists(docsPath));
+        Assert.Equal("hello from memory", await File.ReadAllTextAsync(filePath));
+    }
+
+    [Fact]
+    public async Task ArchiveProvider_Dokany_CanMount_AndReadViaSystemIO()
+    {
+        if (!IsWindows() || !DokanyBackend.IsAvailable()) return;
+
+        string archivePath = CreateZipArchive("sample.zip", [("readme.txt", "archive content")]);
+        var root = new ArchiveFolder(new SystemFile(archivePath));
+        using var backend = MakeDokany(root, readOnly: true);
+        await using var mount = await MountBackendAsync(backend);
+
+        string filePath = Path.Combine(mount.MountPoint, "readme.txt");
+        Assert.Equal("archive content", await File.ReadAllTextAsync(filePath));
+        Assert.True(File.GetAttributes(filePath).HasFlag(FileAttributes.ReadOnly));
     }
 
     // ── Factory helpers ───────────────────────────────────────────────────────
 
-    private WinFspBackend MakeWinFsp(bool readOnly = false)
+    private WinFspBackend MakeWinFsp(IFolder? root = null, bool readOnly = false)
     {
         var blockCache   = new BlockCache("backend-test", cacheDir: _tempDir);
         var rangeReaders = new RangeReaderRegistry();
         return new WinFspBackend(
-            new MemoryFolder("root", "root"),
+            root ?? new MemoryFolder("root", "root"),
             blockCache, rangeReaders, readOnly: readOnly);
     }
 
     [SupportedOSPlatform("windows10.0.17763.0")]
-    private ProjFsBackend MakeProjFs(bool readOnly = false)
+    private ProjFsBackend MakeProjFs(IFolder? root = null, bool readOnly = false)
     {
         var blockCache   = new BlockCache("backend-test", cacheDir: _tempDir);
         var rangeReaders = new RangeReaderRegistry();
         return new ProjFsBackend(
-            new MemoryFolder("root", "root"),
+            root ?? new MemoryFolder("root", "root"),
             blockCache, rangeReaders, readOnly: readOnly);
     }
 
-    private DokanyBackend MakeDokany(bool readOnly = false)
+    private DokanyBackend MakeDokany(IFolder? root = null, bool readOnly = false)
     {
         var blockCache = new BlockCache("backend-test", cacheDir: _tempDir);
         var rangeReaders = new RangeReaderRegistry();
         return new DokanyBackend(
-            new MemoryFolder("root", "root"),
+            root ?? new MemoryFolder("root", "root"),
             blockCache, rangeReaders, readOnly: readOnly);
+    }
+
+    private static string CreateZipArchive(string fileName, IReadOnlyList<(string Name, string Content)> entries)
+    {
+        string tempDir = Path.Combine(Path.GetTempPath(), "OwlMountArchiveTests_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDir);
+
+        string sourceDir = Path.Combine(tempDir, "source");
+        Directory.CreateDirectory(sourceDir);
+        foreach (var (name, content) in entries)
+            File.WriteAllText(Path.Combine(sourceDir, name), content);
+
+        string archivePath = Path.Combine(tempDir, fileName);
+        ZipFile.CreateFromDirectory(sourceDir, archivePath);
+        return archivePath;
+    }
+
+    private static async Task<MountedBackend> MountBackendAsync(IOwlMountBackend backend)
+    {
+        foreach (char driveLetter in GetFreeDriveLetters())
+        {
+            string mountPoint = driveLetter + ":";
+            if (!backend.Start(mountPoint, "OwlMountTests"))
+                continue;
+
+            string driveRoot = mountPoint + Path.DirectorySeparatorChar;
+            if (Directory.Exists(driveRoot))
+            {
+                await Task.Yield();
+                return new MountedBackend(backend, mountPoint);
+            }
+
+            backend.Stop();
+        }
+
+        throw new InvalidOperationException("No usable free drive letter was available for the backend mount.");
+    }
+
+    private static IEnumerable<char> GetFreeDriveLetters()
+    {
+        HashSet<char> usedLetters = [.. DriveInfo.GetDrives()
+            .Select(d => char.ToUpperInvariant(d.Name[0]))
+            .Where(c => c is >= 'A' and <= 'Z')];
+
+        foreach (char letter in Enumerable.Range('D', 'Z' - 'D' + 1).Select(i => (char)i))
+            if (!usedLetters.Contains(letter))
+                yield return letter;
+    }
+
+    private sealed record MountedBackend(IOwlMountBackend Backend, string MountPoint) : IAsyncDisposable
+    {
+        public ValueTask DisposeAsync()
+        {
+            try { Backend.Stop(); }
+            finally { Backend.Dispose(); }
+            return ValueTask.CompletedTask;
+        }
     }
 }
 
