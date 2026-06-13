@@ -13,6 +13,7 @@
     <LangVersion>preview</LangVersion>
     <RestoreAdditionalProjectSources>https://pkgs.dev.azure.com/dotnet/CommunityToolkit/_packaging/CommunityToolkit-Labs/nuget/v3/index.json</RestoreAdditionalProjectSources>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <EnableGeneratedComInterfaceComImportInterop>true</EnableGeneratedComInterfaceComImportInterop>
   </PropertyGroup>
 
   <ItemGroup>

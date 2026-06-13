@@ -16,12 +16,14 @@ public partial class SettingsPageViewModel : ObservableObject
 {
     private readonly MountService _mountService;
     private readonly AppSettingsService _settingsService;
+    private readonly WindowsStartupService _startupService;
     private readonly LocalLogService _log;
     private Func<Window?> _windowProvider = () => null;
     private bool _saveMountConfigurations;
     private bool _persistMemoryFsOnExit;
     private string _persistMemoryFsPath = string.Empty;
     private bool _isPersistMemoryFsPathEnabled;
+    private bool _runOnWindowsStartup;
     private ElementTheme _selectedTheme;
     private long _defaultBlockCacheSizeBytes;
     private bool _enableBlockCache;
@@ -55,6 +57,19 @@ public partial class SettingsPageViewModel : ObservableObject
             {
                 _mountService.SetSaveMountPointConfigurations(value);
                 _ = _log.InfoAsync($"Save mount configurations set to {value}.");
+            }
+        }
+    }
+
+    public bool RunOnWindowsStartup
+    {
+        get => _runOnWindowsStartup;
+        set
+        {
+            if (SetProperty(ref _runOnWindowsStartup, value))
+            {
+                _startupService.SetEnabled(value);
+                _ = _log.InfoAsync($"Run on Windows startup set to {value}.");
             }
         }
     }
@@ -205,10 +220,15 @@ public partial class SettingsPageViewModel : ObservableObject
     [ObservableProperty] public partial string ClearCacheStatusText { get; set; } = string.Empty;
     [ObservableProperty] public partial string ClearProjFsStatusText { get; set; } = string.Empty;
 
-    public SettingsPageViewModel(MountService mountService, AppSettingsService settingsService, LocalLogService log)
+    public SettingsPageViewModel(
+        MountService mountService,
+        AppSettingsService settingsService,
+        WindowsStartupService startupService,
+        LocalLogService log)
     {
         _mountService = mountService;
         _settingsService = settingsService;
+        _startupService = startupService;
         _log = log;
         BrowseExportPathCommand = new AsyncRelayCommand(BrowseExportPathAsync);
         ClearDiskCacheCommand = new AsyncRelayCommand(ClearDiskCacheAsync);
@@ -226,6 +246,7 @@ public partial class SettingsPageViewModel : ObservableObject
         _enableBlockCache = _settingsService.GetSetting<bool>(OwlMountConstants.EnableBlockCacheSettingKey);
         _defaultProvider = _settingsService.GetSetting<string>(OwlMountConstants.DefaultProviderSettingKey);
         _defaultBackend = _settingsService.GetSetting<string>(OwlMountConstants.DefaultBackendSettingKey);
+        _runOnWindowsStartup = _startupService.IsEnabled;
         _saveMountConfigurations = _mountService.SaveMountPointConfigurations;
         _persistMemoryFsOnExit = _mountService.PersistMemoryFileSystemOnExit;
         _persistMemoryFsPath = _mountService.MemoryFileSystemPersistPath;

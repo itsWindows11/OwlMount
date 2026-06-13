@@ -29,6 +29,7 @@ public partial class App : Application
         var services = new ServiceCollection();
         services.AddSingleton<MountService>();
         services.AddSingleton<AppSettingsService>();
+        services.AddSingleton<WindowsStartupService>();
         services.AddSingleton<LocalLogService>();
         services.AddSingleton<AppExitService>();
         services.AddSingleton<IAppExitService>(sp => sp.GetRequiredService<AppExitService>());
@@ -44,6 +45,7 @@ public partial class App : Application
         services.AddSingleton(sp => new Views.SettingsPageViewModel(
             sp.GetRequiredService<MountService>(),
             sp.GetRequiredService<AppSettingsService>(),
+            sp.GetRequiredService<WindowsStartupService>(),
             sp.GetRequiredService<LocalLogService>()));
         services.AddSingleton<MainWindow>();
         Services = services.BuildServiceProvider();
