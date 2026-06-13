@@ -207,6 +207,30 @@ public sealed class BackendTests : IDisposable
         backend.Stop(); // must not throw
     }
 
+    // ── Memory provider tests ────────────────────────────────────────────────
+
+    [Fact]
+    public async Task MemoryProvider_CanCreateFoldersAndWriteThenReadBackFiles()
+    {
+        var root = new MemoryFolder("memory-root", "memory-root");
+        var docs = (IModifiableFolder)await root.CreateFolderAsync("docs", overwrite: false);
+        var file = (IFile)await docs.CreateFileAsync("hello.txt", overwrite: false);
+
+        const string expected = "hello from memory";
+        await using (Stream stream = await file.OpenStreamAsync(FileAccess.Write))
+        {
+            byte[] bytes = System.Text.Encoding.UTF8.GetBytes(expected);
+            await stream.WriteAsync(bytes);
+        }
+
+        var folder = (IFolder)await root.GetFirstByNameAsync("docs");
+        var roundTrip = (IFile)await folder.GetFirstByNameAsync("hello.txt");
+        await using Stream readStream = await roundTrip.OpenStreamAsync(FileAccess.Read);
+        using var reader = new StreamReader(readStream, System.Text.Encoding.UTF8);
+
+        Assert.Equal(expected, await reader.ReadToEndAsync());
+    }
+
     // ── Factory helpers ───────────────────────────────────────────────────────
 
     private WinFspBackend MakeWinFsp(bool readOnly = false)
