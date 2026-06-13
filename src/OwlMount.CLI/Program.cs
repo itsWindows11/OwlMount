@@ -142,9 +142,20 @@ static partial class Program
         {
             // ── memory ────────────────────────────────────────────────────────
             case "memory":
+                if (forceReadOnly)
+                {
+                    Console.Error.WriteLine("Error: memory provider cannot be read-only.");
+                    return 1;
+                }
                 root = new MemoryFolder(id: "memory-root", name: "memory-root");
                 displayRoot = "(in-memory, starts empty)";
                 (totalSize, freeSize) = GetMemoryVolumeSpace(memorySizeBytes);
+                
+                if (memorySizeBytes.HasValue && memorySizeBytes.Value > 0 && freeSize.HasValue && (ulong)memorySizeBytes.Value > freeSize.Value)
+                {
+                    Console.Error.WriteLine($"Error: Not enough free physical memory. Requested: {FormatBytes((ulong)memorySizeBytes.Value)}, Available: {FormatBytes(freeSize.Value)}.");
+                    return 1;
+                }
                 break;
 
             // ── archive ───────────────────────────────────────────────────────
@@ -167,7 +178,7 @@ static partial class Program
                 root = new ArchiveFolder(new SystemFile(fullArchivePath));
                 displayRoot = fullArchivePath;
                 totalSize = TryGetArchiveVolumeSize(fullArchivePath);
-                forceReadOnly = true; // archives are inherently read-only
+                if (new FileInfo(fullArchivePath).IsReadOnly) forceReadOnly = true;
                 break;
             }
 
@@ -630,17 +641,50 @@ static partial class Program
 
     // ── Volume size helpers ───────────────────────────────────────────────────
 
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct MEMORYSTATUSEX
+    {
+        public uint dwLength;
+        public uint dwMemoryLoad;
+        public ulong ullTotalPhys;
+        public ulong ullAvailPhys;
+        public ulong ullTotalPageFile;
+        public ulong ullAvailPageFile;
+        public ulong ullTotalVirtual;
+        public ulong ullAvailVirtual;
+        public ulong ullAvailExtendedVirtual;
+    }
+
+    [LibraryImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool GlobalMemoryStatusEx(ref MEMORYSTATUSEX lpBuffer);
+
     static (ulong? TotalSize, ulong? FreeSize) GetMemoryVolumeSpace(long? limitBytes = null)
     {
-        var gcInfo = GC.GetGCMemoryInfo();
-        if (gcInfo.TotalAvailableMemoryBytes <= 0)
-            return (null, null);
+        ulong physicalTotal = 0;
+        ulong physicalFree = 0;
 
-        ulong physicalTotal = (ulong)gcInfo.TotalAvailableMemoryBytes;
-        ulong used          = (ulong)Math.Max(GC.GetTotalMemory(forceFullCollection: false), 0L);
-        ulong physicalFree  = used >= physicalTotal ? 0 : physicalTotal - used;
+        var memStatus = new MEMORYSTATUSEX();
+        memStatus.dwLength = (uint)Marshal.SizeOf<MEMORYSTATUSEX>();
+        if (GlobalMemoryStatusEx(ref memStatus))
+        {
+            physicalTotal = memStatus.ullTotalPhys;
+            physicalFree = memStatus.ullAvailPhys;
+        }
+        else
+        {
+            var gcInfo = GC.GetGCMemoryInfo();
+            if (gcInfo.TotalAvailableMemoryBytes > 0)
+            {
+                physicalTotal = (ulong)gcInfo.TotalAvailableMemoryBytes;
+                ulong used = (ulong)Math.Max(GC.GetTotalMemory(forceFullCollection: false), 0L);
+                physicalFree = used >= physicalTotal ? 0 : physicalTotal - used;
+            }
+        }
 
-        ulong total = limitBytes.HasValue
+        if (physicalTotal == 0) return (null, null);
+
+        ulong total = limitBytes.HasValue && limitBytes.Value > 0
             ? Math.Min((ulong)limitBytes.Value, physicalTotal)
             : physicalTotal;
         ulong free  = Math.Min(physicalFree, total);

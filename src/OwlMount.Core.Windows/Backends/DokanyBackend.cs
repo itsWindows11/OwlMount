@@ -207,6 +207,7 @@ internal sealed class DokanyOperations : IDokanOperations
         "desktop.ini",
         "thumbs.db",
         "autorun.inf",
+        "$RECYCLE.BIN"
     };
 
     private readonly IFolder _root;
@@ -738,10 +739,14 @@ internal sealed class DokanyOperations : IDokanOperations
     {
         long length = _sizeProviders.GetProvider(file).GetSizeAsync(file).GetAwaiter().GetResult() ?? 0L;
         DateTimeOffset now = DateTimeOffset.UtcNow;
+        var attrs = _isReadOnly ? FileAttributes.ReadOnly | FileAttributes.Archive : FileAttributes.Archive;
+        if (fileName.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
+            attrs |= FileAttributes.Offline;
+
         return new FileInformation
         {
             FileName = fileName,
-            Attributes = _isReadOnly ? FileAttributes.ReadOnly | FileAttributes.Archive : FileAttributes.Archive,
+            Attributes = attrs,
             CreationTime = StorageTimestampHelper.GetCreatedAt(file)?.UtcDateTime ?? now.UtcDateTime,
             LastAccessTime = StorageTimestampHelper.GetLastAccessedAt(file)?.UtcDateTime ?? now.UtcDateTime,
             LastWriteTime = StorageTimestampHelper.GetLastModifiedAt(file)?.UtcDateTime ?? now.UtcDateTime,
