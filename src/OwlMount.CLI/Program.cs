@@ -178,7 +178,7 @@ static partial class Program
                 root = new ArchiveFolder(new SystemFile(fullArchivePath));
                 displayRoot = fullArchivePath;
                 totalSize = TryGetArchiveVolumeSize(fullArchivePath);
-                if (new FileInfo(fullArchivePath).IsReadOnly) forceReadOnly = true;
+                forceReadOnly = new FileInfo(fullArchivePath).IsReadOnly;
                 break;
             }
 
