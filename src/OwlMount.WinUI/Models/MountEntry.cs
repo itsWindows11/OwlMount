@@ -9,28 +9,54 @@ public partial class MountEntry : ObservableObject
     public string Provider { get; init; }
     public string ProviderDisplay { get; init; }
     public string State { get; init; }
-    public long CapacityBytes { get; init; }
     public bool IsEnabled { get; init; }
     [ObservableProperty] public partial bool IsSelected { get; set; }
 
-    public string CapacityDisplay => CapacityBytes > 0 ? FormatBytes(CapacityBytes) : string.Empty;
+    [ObservableProperty]
+    private long _capacityBytes;
 
-    public MountEntry(string driveLetter, string label, string provider, string providerDisplay, string state, long capacityBytes, bool isEnabled = true)
+    [ObservableProperty]
+    private long? _freeBytes;
+
+    public string CapacityDisplay => CapacityBytes > 0
+        ? FreeBytes.HasValue
+            ? $"Capacity: {FormatBytes(CapacityBytes)} total, {FormatBytes(FreeBytes.Value)} free"
+            : $"Capacity: {FormatBytes(CapacityBytes)} total"
+        : string.Empty;
+
+    public MountEntry(
+        string driveLetter,
+        string label,
+        string provider,
+        string providerDisplay,
+        string state,
+        long capacityBytes,
+        long? freeBytes,
+        bool isEnabled = true)
     {
         DriveLetter = driveLetter;
         Label = label;
         Provider = provider;
         ProviderDisplay = providerDisplay;
         State = state;
-        CapacityBytes = capacityBytes;
         IsEnabled = isEnabled;
+        CapacityBytes = capacityBytes;
+        FreeBytes = freeBytes;
+    }
+
+    public void UpdateCapacity(long capacityBytes, long? freeBytes)
+    {
+        bool changed = SetProperty(ref _capacityBytes, capacityBytes);
+        changed |= SetProperty(ref _freeBytes, freeBytes);
+        if (changed)
+            OnPropertyChanged(nameof(CapacityDisplay));
     }
 
     private static string FormatBytes(long bytes) => bytes switch
     {
-        >= 1024 * 1024 * 1024 => $"Capacity: {bytes / (1024.0 * 1024 * 1024):F1} GB total",
-        >= 1024 * 1024 => $"Capacity: {bytes / (1024.0 * 1024):F1} MB total",
-        >= 1024 => $"Capacity: {bytes / 1024.0:F1} KB total",
-        _ => $"Capacity: {bytes} B total",
+        >= 1024 * 1024 * 1024 => $"{bytes / (1024.0 * 1024 * 1024):F1} GB",
+        >= 1024 * 1024 => $"{bytes / (1024.0 * 1024):F1} MB",
+        >= 1024 => $"{bytes / 1024.0:F1} KB",
+        _ => $"{bytes} B",
     };
 }

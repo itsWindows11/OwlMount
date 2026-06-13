@@ -218,6 +218,7 @@ internal sealed class DokanyOperations : IDokanOperations
     private readonly long _totalSize;
     private readonly long _freeSize;
     private readonly string _volumeLabel;
+    private readonly string _fileSystemName;
     private readonly ConcurrentDictionary<string, IFolder> _folderCache = new(StringComparer.OrdinalIgnoreCase);
 
     public DokanyOperations(
@@ -228,7 +229,8 @@ internal sealed class DokanyOperations : IDokanOperations
         bool isReadOnly,
         ulong? totalSize,
         ulong? freeSize,
-        string? volumeLabel)
+        string? volumeLabel,
+        string? providerName = null)
     {
         _root = root;
         _blockCache = blockCache;
@@ -238,6 +240,7 @@ internal sealed class DokanyOperations : IDokanOperations
         _totalSize = (long)Math.Min(totalSize ?? (ulong)(512L * 1024 * 1024 * 1024), long.MaxValue);
         _freeSize = (long)Math.Min(freeSize ?? (ulong)(256L * 1024 * 1024 * 1024), long.MaxValue);
         _volumeLabel = string.IsNullOrWhiteSpace(volumeLabel) ? "OwlMount" : volumeLabel.Trim();
+        _fileSystemName = BuildFileSystemName("Dokany", providerName);
         _folderCache.TryAdd(string.Empty, _root);
     }
 
@@ -421,6 +424,9 @@ internal sealed class DokanyOperations : IDokanOperations
             List<FileInformation> result = [];
             foreach (IStorableChild child in folder.GetItemsAsync().ToBlockingEnumerable())
             {
+                if (WindowsNoiseFiles.Contains(child.Name))
+                    continue;
+
                 switch (child)
                 {
                     case IFolder:
@@ -492,6 +498,9 @@ internal sealed class DokanyOperations : IDokanOperations
         try
         {
             string path = NormalizePath(fileName);
+            if (IsWindowsNoisePath(path))
+                return NtStatus.ObjectNameNotFound;
+
             string parentPath = GetParentPath(path);
             IFolder? parent = ResolveFolderOrRoot(parentPath);
             IStorableChild? item = (info.Context as IStorableChild) ?? ResolveItem(path);
@@ -518,6 +527,8 @@ internal sealed class DokanyOperations : IDokanOperations
         {
             string path = NormalizePath(fileName);
             if (string.IsNullOrEmpty(path)) return NtStatus.AccessDenied;
+            if (IsWindowsNoisePath(path))
+                return NtStatus.ObjectNameNotFound;
 
             string parentPath = GetParentPath(path);
             IFolder? parent = ResolveFolderOrRoot(parentPath);
@@ -632,7 +643,7 @@ internal sealed class DokanyOperations : IDokanOperations
     public NtStatus GetVolumeInformation(out string volumeLabel, out FileSystemFeatures features, out string fileSystemName, out uint maximumComponentLength, IDokanFileInfo info)
     {
         volumeLabel = _volumeLabel;
-        fileSystemName = "DOKAN";
+        fileSystemName = _fileSystemName;
         maximumComponentLength = 255;
         features = FileSystemFeatures.CasePreservedNames
                  | FileSystemFeatures.UnicodeOnDisk
@@ -712,6 +723,9 @@ internal sealed class DokanyOperations : IDokanOperations
 
     private IStorableChild? GetChild(IFolder folder, string name)
     {
+        if (WindowsNoiseFiles.Contains(name))
+            return null;
+
         try
         {
             return folder.GetFirstByNameAsync(name).GetAwaiter().GetResult();
@@ -788,13 +802,27 @@ internal sealed class DokanyOperations : IDokanOperations
         IAsyncEnumerator<IStorableChild> e = folder.GetItemsAsync().GetAsyncEnumerator();
         try
         {
-            return e.MoveNextAsync().ConfigureAwait(false).GetAwaiter().GetResult();
+            while (e.MoveNextAsync().ConfigureAwait(false).GetAwaiter().GetResult())
+            {
+                if (!WindowsNoiseFiles.Contains(e.Current.Name))
+                    return true;
+            }
+
+            return false;
         }
         finally
         {
             e.DisposeAsync().ConfigureAwait(false).GetAwaiter().GetResult();
         }
     }
+
+    private static bool IsWindowsNoisePath(string normalizedPath) =>
+        WindowsNoiseFiles.Contains(GetLeafName(normalizedPath));
+
+    private static string BuildFileSystemName(string backendName, string? providerName) =>
+        string.IsNullOrWhiteSpace(providerName)
+            ? $"OwlMount ({backendName})"
+            : $"OwlMount ({backendName} with {providerName.Trim()})";
 
     private void InvalidatePath(string normalizedPath)
     {

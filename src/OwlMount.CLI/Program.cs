@@ -45,7 +45,7 @@ static partial class Program
     {
         string  provider      = OwlMountConstants.DefaultProvider;
         string  backend       = OwlMountConstants.DefaultBackend;
-        string  letter        = OwlMountConstants.DefaultDriveLetter;
+        string? letter        = null;
         string? label         = null;
         string? path          = null;
         bool    forceReadOnly = false;
@@ -313,7 +313,14 @@ static partial class Program
         }
 
         // ── Derive defaults ───────────────────────────────────────────────────
-        string driveLetter = letter.TrimEnd(':').ToUpperInvariant();
+        string driveLetter = string.IsNullOrWhiteSpace(letter)
+            ? GetFirstFreeDriveLetter()
+            : letter.TrimEnd(':').ToUpperInvariant();
+        if (string.IsNullOrWhiteSpace(driveLetter))
+        {
+            Console.Error.WriteLine("Error: no free drive letters are available.");
+            return 1;
+        }
         string resolvedLabel = label ?? provider.ToUpperInvariant() switch
         {
             "MEMORY"    => $"OwlMount-Memory-{driveLetter}",
@@ -392,7 +399,8 @@ static partial class Program
                 readOnly: isReadOnly,
                 totalSize: totalSize,
                 freeSize: freeSize,
-                volumeLabel: resolvedLabel);
+                volumeLabel: resolvedLabel,
+                providerName: provider);
         }
         else
         {
@@ -401,7 +409,8 @@ static partial class Program
                 readOnly:    isReadOnly,
                 totalSize:   totalSize,
                 freeSize:    freeSize,
-                volumeLabel: resolvedLabel);
+                volumeLabel: resolvedLabel,
+                providerName: provider);
         }
 
         // DispatcherStopped (WinFsp) or equivalent fires when the drive is ejected externally.
@@ -585,7 +594,7 @@ static partial class Program
             $"  --provider   memory | archive | local | kubo-mfs | kubo-ipfs | kubo-ipns | s3 | nfs  (default: {OwlMountConstants.DefaultProvider})");
         Console.WriteLine(
             $"  --backend    dokany | winfsp | projfs  (default: {OwlMountConstants.DefaultBackend})");
-        Console.WriteLine($"  --letter     Drive letter to mount on (default: {OwlMountConstants.DefaultDriveLetter})");
+        Console.WriteLine("  --letter     Drive letter to mount on (default: first free drive letter)");
         Console.WriteLine("  --label      Volume label shown in Explorer (default: auto)");
         Console.WriteLine("  --read-only  Force the mounted filesystem to open as read-only");
         Console.WriteLine();
@@ -704,6 +713,35 @@ static partial class Program
         {
             return null;
         }
+    }
+
+    static string GetFirstFreeDriveLetter()
+    {
+        HashSet<string> occupied = new(StringComparer.OrdinalIgnoreCase);
+        foreach (string drive in Environment.GetLogicalDrives())
+        {
+            string? root = Path.GetPathRoot(Path.GetFullPath(drive));
+            if (string.IsNullOrWhiteSpace(root))
+                continue;
+
+            occupied.Add(root.TrimEnd('\\', ':').ToUpperInvariant());
+        }
+
+        for (char letter = 'M'; letter <= 'Z'; letter++)
+        {
+            string candidate = letter.ToString();
+            if (!occupied.Contains(candidate))
+                return candidate;
+        }
+
+        for (char letter = 'A'; letter < 'M'; letter++)
+        {
+            string candidate = letter.ToString();
+            if (!occupied.Contains(candidate))
+                return candidate;
+        }
+
+        return string.Empty;
     }
 
     static async Task<(ulong? TotalSize, ulong? FreeSize)> TryGetKuboRepositorySpaceAsync(IpfsClient client)

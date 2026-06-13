@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Runtime.InteropServices;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Microsoft.UI.Xaml;
@@ -21,6 +22,7 @@ public partial class MainWindowViewModel : ObservableObject
     private Func<string?> _s3SecretProvider;
     private bool _isInitializing = true;
     private bool? _readOnlyBeforeArchive;
+    private readonly Timer _capacityRefreshTimer;
 
     public ObservableCollection<MountEntry> Mounts { get; } = [];
     public ObservableCollection<MountEntry> SelectedMounts { get; } = [];
@@ -120,6 +122,7 @@ public partial class MainWindowViewModel : ObservableObject
         ExitCommand = new RelayCommand(_exitService.Exit);
 
         RefreshMountsFromService();
+        _capacityRefreshTimer = new Timer(_ => RefreshMemoryMountCapacities(), null, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1));
         UpdateProviderPanels();
         _isInitializing = false;
     }
@@ -135,13 +138,19 @@ public partial class MainWindowViewModel : ObservableObject
             string letter = m.DriveLetter.TrimEnd(':').ToUpperInvariant();
             activeLookup[letter] = m;
             string state = m.IsReadOnly ? "Running (R/O)" : "Running";
+            ProviderOptions? config = _mountService.MountConfigurations
+                .FirstOrDefault(c => c.Letter.TrimEnd(':').Equals(letter, StringComparison.OrdinalIgnoreCase));
+            (long capacityBytes, long? freeBytes) = m.Provider.Equals(OwlMountConstants.MemoryProvider, StringComparison.OrdinalIgnoreCase)
+                ? GetMemorySpaceBytes(config)
+                : ((long)(GetDriveCapacityBytes(m.DriveLetter) ?? 0), null);
             Mounts.Add(new MountEntry(
                 m.DriveLetter,
                 m.Label,
                 m.Provider,
                 GetProviderDisplayName(m.Provider),
                 state,
-                GetDriveCapacityBytes(m.DriveLetter),
+                capacityBytes,
+                freeBytes,
                 isEnabled: true));
         }
 
@@ -158,6 +167,7 @@ public partial class MainWindowViewModel : ObservableObject
                     GetProviderDisplayName(config.Provider),
                     "Disabled",
                     0,
+                    null,
                     isEnabled: false));
             }
         }
@@ -168,6 +178,33 @@ public partial class MainWindowViewModel : ObservableObject
         // Notify property changes for selection-dependent UI
         OnPropertyChanged(nameof(SelectAllVisibility));
         OnPropertyChanged(nameof(SelectAllButtonText));
+    }
+
+    private void RefreshMemoryMountCapacities()
+    {
+        try
+        {
+            bool updated = false;
+            foreach (MountEntry mount in Mounts)
+            {
+                if (!mount.IsEnabled || !mount.Provider.Equals(OwlMountConstants.MemoryProvider, StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                ProviderOptions? config = _mountService.MountConfigurations
+                    .FirstOrDefault(c => c.Letter.TrimEnd(':').Equals(mount.DriveLetter.TrimEnd(':'), StringComparison.OrdinalIgnoreCase));
+                (long capacity, long? freeBytes) = GetMemorySpaceBytes(config);
+
+                mount.UpdateCapacity(capacity, freeBytes);
+                updated = true;
+            }
+
+            if (updated)
+                OnPropertyChanged(nameof(Mounts));
+        }
+        catch
+        {
+            // best-effort refresh
+        }
     }
 
     public void SetStatus(string message) => StatusMessage = message;
@@ -536,22 +573,82 @@ public partial class MainWindowViewModel : ObservableObject
         _ = _log.InfoAsync($"Mount attempt complete. Success={successCount}, Failures={failures.Count}.");
     }
 
-    private static long GetDriveCapacityBytes(string driveLetter)
+    private static long? GetDriveCapacityBytes(string driveLetter)
     {
         try
         {
             string root = $"{driveLetter.TrimEnd(':')}:\\";
             var info = new DriveInfo(root);
             if (!info.IsReady)
-                return 0;
+                return null;
 
             return info.TotalSize;
         }
         catch
         {
-            return 0;
+            return null;
         }
     }
+
+    private static (long CapacityBytes, long? FreeBytes) GetMemorySpaceBytes(ProviderOptions? config)
+    {
+        long? limitBytes = config?.MemorySizeLimitBytes;
+        var (totalSize, freeSize) = GetMemoryVolumeSpace(limitBytes);
+        return (
+            totalSize.HasValue ? (long)totalSize.Value : 0,
+            freeSize.HasValue ? (long)freeSize.Value : null);
+    }
+
+    private static (ulong? TotalSize, ulong? FreeSize) GetMemoryVolumeSpace(long? limitBytes = null)
+    {
+        ulong physicalTotal = 0;
+        ulong physicalFree = 0;
+
+        var memStatus = new MEMORYSTATUSEX();
+        memStatus.dwLength = (uint)Marshal.SizeOf<MEMORYSTATUSEX>();
+        if (GlobalMemoryStatusEx(ref memStatus))
+        {
+            physicalTotal = memStatus.ullTotalPhys;
+            physicalFree = memStatus.ullAvailPhys;
+        }
+        else
+        {
+            var gcInfo = GC.GetGCMemoryInfo();
+            if (gcInfo.TotalAvailableMemoryBytes > 0)
+            {
+                physicalTotal = (ulong)gcInfo.TotalAvailableMemoryBytes;
+                ulong used = (ulong)Math.Max(GC.GetTotalMemory(forceFullCollection: false), 0L);
+                physicalFree = used >= physicalTotal ? 0 : physicalTotal - used;
+            }
+        }
+
+        if (physicalTotal == 0)
+            return (null, null);
+
+        ulong total = limitBytes.HasValue && limitBytes.Value > 0
+            ? Math.Min((ulong)limitBytes.Value, physicalTotal)
+            : physicalTotal;
+        ulong free = Math.Min(physicalFree, total);
+        return (total, free);
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MEMORYSTATUSEX
+    {
+        public uint dwLength;
+        public uint dwMemoryLoad;
+        public ulong ullTotalPhys;
+        public ulong ullAvailPhys;
+        public ulong ullTotalPageFile;
+        public ulong ullAvailPageFile;
+        public ulong ullTotalVirtual;
+        public ulong ullAvailVirtual;
+        public ulong ullAvailExtendedVirtual;
+    }
+
+    [LibraryImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool GlobalMemoryStatusEx(ref MEMORYSTATUSEX lpBuffer);
 
     private static string GetDriveCapacityText(string driveLetter)
     {

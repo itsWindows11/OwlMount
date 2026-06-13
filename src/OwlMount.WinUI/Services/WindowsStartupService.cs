@@ -53,7 +53,7 @@ public sealed class WindowsStartupService
 [GeneratedComClass]
 [Guid("00021401-0000-0000-C000-000000000046")]
 [ClassInterface(ClassInterfaceType.None)]
-file sealed partial class ShellLink;
+file sealed partial class ShellLink : IShellLinkW, IPersistFile;
 
 [GeneratedComInterface]
 [Guid("00021401-0000-0000-C000-000000000046")]
