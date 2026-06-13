@@ -28,11 +28,11 @@ Windows drive letter. Three filesystem backends are available:
 
 ### GUI/WinUI 3 app
 
-<video controls loop muted playsinline width="100%" src="./media/owlmount-gui-poc.mp4"></video>
+<video controls loop muted playsinline width="100%" src="https://raw.githubusercontent.com/itsWindows11/OwlMount/main/media/owlmount-gui-poc.mp4"></video>
 
 ### CLI app
 
-<video controls loop muted playsinline width="100%" src="./media/owlmount-cli-poc.mp4"></video>
+<video controls loop muted playsinline width="100%" src="https://raw.githubusercontent.com/itsWindows11/OwlMount/main/media/owlmount-cli-poc.mp4"></video>
 
 ## Prerequisites
 
