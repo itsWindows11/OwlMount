@@ -2,54 +2,40 @@ using CommunityToolkit.Mvvm.ComponentModel;
 
 namespace OwlMount.WinUI;
 
-public partial class MountEntry : ObservableObject
+public partial class MountEntry(
+    string driveLetter,
+    string label,
+    string provider,
+    string providerDisplay,
+    string state,
+    long capacityBytes,
+    long? freeBytes,
+    bool isEnabled = true) : ObservableObject
 {
-    public string DriveLetter { get; init; }
-    public string Label { get; init; }
-    public string Provider { get; init; }
-    public string ProviderDisplay { get; init; }
-    public string State { get; init; }
-    public bool IsEnabled { get; init; }
+    public string DriveLetter { get; init; } = driveLetter;
+    public string Label { get; init; } = label;
+    public string Provider { get; init; } = provider;
+    public string ProviderDisplay { get; init; } = providerDisplay;
+    public string State { get; init; } = state;
+    public bool IsEnabled { get; init; } = isEnabled;
+
     [ObservableProperty] public partial bool IsSelected { get; set; }
 
-    [ObservableProperty]
-    private long _capacityBytes;
+    [ObservableProperty] public partial long CapacityBytes { get; set; } = capacityBytes;
 
-    [ObservableProperty]
-    private long? _freeBytes;
+    [ObservableProperty] public partial long FreeBytes { get; set; } = freeBytes ?? 0;
 
     public string CapacityDisplay => CapacityBytes > 0
-        ? FreeBytes.HasValue
-            ? $"Capacity: {FormatBytes(CapacityBytes)} total, {FormatBytes(FreeBytes.Value)} free"
+        ? FreeBytes > 0
+            ? $"Capacity: {FormatBytes(CapacityBytes)} total, {FormatBytes(FreeBytes)} free"
             : $"Capacity: {FormatBytes(CapacityBytes)} total"
         : string.Empty;
 
-    public MountEntry(
-        string driveLetter,
-        string label,
-        string provider,
-        string providerDisplay,
-        string state,
-        long capacityBytes,
-        long? freeBytes,
-        bool isEnabled = true)
-    {
-        DriveLetter = driveLetter;
-        Label = label;
-        Provider = provider;
-        ProviderDisplay = providerDisplay;
-        State = state;
-        IsEnabled = isEnabled;
-        CapacityBytes = capacityBytes;
-        FreeBytes = freeBytes;
-    }
-
     public void UpdateCapacity(long capacityBytes, long? freeBytes)
     {
-        bool changed = SetProperty(ref _capacityBytes, capacityBytes);
-        changed |= SetProperty(ref _freeBytes, freeBytes);
-        if (changed)
-            OnPropertyChanged(nameof(CapacityDisplay));
+        CapacityBytes = capacityBytes;
+        FreeBytes = freeBytes ?? 0;
+        OnPropertyChanged(nameof(CapacityDisplay));
     }
 
     private static string FormatBytes(long bytes) => bytes switch

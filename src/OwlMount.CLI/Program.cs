@@ -643,8 +643,9 @@ static partial class Program
     static string GetPidFilePath(string letter) =>
         Path.Combine(GetPidsDir(), letter.TrimEnd(':').ToUpperInvariant() + ".pid");
 
-    static void DeletePidFile(string letter)
+    static void DeletePidFile(string? letter)
     {
+        if (letter == null) return;
         try { File.Delete(GetPidFilePath(letter)); } catch { /* best-effort */ }
     }
 

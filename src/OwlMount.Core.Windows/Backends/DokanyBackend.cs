@@ -42,7 +42,8 @@ public sealed class DokanyBackend : IOwlMountBackend
         bool readOnly = false,
         ulong? totalSize = null,
         ulong? freeSize = null,
-        string? volumeLabel = null)
+        string? volumeLabel = null,
+        string? providerName = null)
     {
         IsReadOnly = readOnly || root is not IModifiableFolder;
         _operations = new DokanyOperations(
@@ -53,7 +54,8 @@ public sealed class DokanyBackend : IOwlMountBackend
             IsReadOnly,
             totalSize,
             freeSize,
-            volumeLabel);
+            volumeLabel,
+            providerName);
     }
 
     /// <summary>

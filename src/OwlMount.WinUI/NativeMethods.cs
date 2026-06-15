@@ -12,6 +12,9 @@ internal static partial class NativeMethods
     [return: MarshalAs(UnmanagedType.Bool)]
     internal static partial bool SHObjectProperties(nint hwnd, uint shopObjectType, string pszObjectName, string? pszPropertyPage);
 
+    [LibraryImport("ole32.dll")]
+    public static partial int CoCreateInstance(ref Guid rclsid, IntPtr pUnkOuter, uint dwClsContext, ref Guid riid, out IntPtr ppv);
+
     internal const uint SHOP_FILEPATH = 0x2;
 
     [StructLayout(LayoutKind.Sequential)]
