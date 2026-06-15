@@ -45,7 +45,7 @@ static partial class Program
     {
         string  provider      = OwlMountConstants.DefaultProvider;
         string  backend       = OwlMountConstants.DefaultBackend;
-        string  letter        = OwlMountConstants.DefaultDriveLetter;
+        string? letter        = null;
         string? label         = null;
         string? path          = null;
         bool    forceReadOnly = false;
@@ -105,9 +105,9 @@ static partial class Program
                 case "--memory-size":
                 {
                     string raw = args[++i].Trim().ToUpperInvariant();
-                    if (raw.EndsWith("G") && ulong.TryParse(raw[..^1], out ulong gb))
+                    if (raw.EndsWith('G') && ulong.TryParse(raw[..^1], out ulong gb))
                         memorySizeBytes = (long)(gb * 1024UL * 1024 * 1024);
-                    else if (raw.EndsWith("M") && ulong.TryParse(raw[..^1], out ulong mb))
+                    else if (raw.EndsWith('M') && ulong.TryParse(raw[..^1], out ulong mb))
                         memorySizeBytes = (long)(mb * 1024UL * 1024);
                     else if (ulong.TryParse(raw, out ulong byteVal))
                         memorySizeBytes = (long)byteVal;
@@ -142,9 +142,20 @@ static partial class Program
         {
             // ── memory ────────────────────────────────────────────────────────
             case "memory":
+                if (forceReadOnly)
+                {
+                    Console.Error.WriteLine("Error: memory provider cannot be read-only.");
+                    return 1;
+                }
                 root = new MemoryFolder(id: "memory-root", name: "memory-root");
                 displayRoot = "(in-memory, starts empty)";
                 (totalSize, freeSize) = GetMemoryVolumeSpace(memorySizeBytes);
+                
+                if (memorySizeBytes.HasValue && memorySizeBytes.Value > 0 && freeSize.HasValue && (ulong)memorySizeBytes.Value > freeSize.Value)
+                {
+                    Console.Error.WriteLine($"Error: Not enough free physical memory. Requested: {FormatBytes((ulong)memorySizeBytes.Value)}, Available: {FormatBytes(freeSize.Value)}.");
+                    return 1;
+                }
                 break;
 
             // ── archive ───────────────────────────────────────────────────────
@@ -167,7 +178,7 @@ static partial class Program
                 root = new ArchiveFolder(new SystemFile(fullArchivePath));
                 displayRoot = fullArchivePath;
                 totalSize = TryGetArchiveVolumeSize(fullArchivePath);
-                forceReadOnly = true; // archives are inherently read-only
+                forceReadOnly = new FileInfo(fullArchivePath).IsReadOnly;
                 break;
             }
 
@@ -302,7 +313,14 @@ static partial class Program
         }
 
         // ── Derive defaults ───────────────────────────────────────────────────
-        string driveLetter = letter.TrimEnd(':').ToUpperInvariant();
+        string driveLetter = string.IsNullOrWhiteSpace(letter)
+            ? GetFirstFreeDriveLetter()
+            : letter.TrimEnd(':').ToUpperInvariant();
+        if (string.IsNullOrWhiteSpace(driveLetter))
+        {
+            Console.Error.WriteLine("Error: no free drive letters are available.");
+            return 1;
+        }
         string resolvedLabel = label ?? provider.ToUpperInvariant() switch
         {
             "MEMORY"    => $"OwlMount-Memory-{driveLetter}",
@@ -370,9 +388,8 @@ static partial class Program
                     "Error: ProjFS backend requires Windows 10 version 1803 (build 17763) or later.");
                 return 1;
             }
-#pragma warning disable CA1416 // resolved by the version check above
+
             vfsBackend = new ProjFsBackend(root, blockCache, rangeReaders, sizeProviders, isReadOnly);
-#pragma warning restore CA1416
         }
         else if (backend == OwlMountConstants.DokanyBackend)
         {
@@ -381,7 +398,8 @@ static partial class Program
                 readOnly: isReadOnly,
                 totalSize: totalSize,
                 freeSize: freeSize,
-                volumeLabel: resolvedLabel);
+                volumeLabel: resolvedLabel,
+                providerName: provider);
         }
         else
         {
@@ -390,7 +408,8 @@ static partial class Program
                 readOnly:    isReadOnly,
                 totalSize:   totalSize,
                 freeSize:    freeSize,
-                volumeLabel: resolvedLabel);
+                volumeLabel: resolvedLabel,
+                providerName: provider);
         }
 
         // DispatcherStopped (WinFsp) or equivalent fires when the drive is ejected externally.
@@ -574,7 +593,7 @@ static partial class Program
             $"  --provider   memory | archive | local | kubo-mfs | kubo-ipfs | kubo-ipns | s3 | nfs  (default: {OwlMountConstants.DefaultProvider})");
         Console.WriteLine(
             $"  --backend    dokany | winfsp | projfs  (default: {OwlMountConstants.DefaultBackend})");
-        Console.WriteLine($"  --letter     Drive letter to mount on (default: {OwlMountConstants.DefaultDriveLetter})");
+        Console.WriteLine("  --letter     Drive letter to mount on (default: first free drive letter)");
         Console.WriteLine("  --label      Volume label shown in Explorer (default: auto)");
         Console.WriteLine("  --read-only  Force the mounted filesystem to open as read-only");
         Console.WriteLine();
@@ -620,27 +639,64 @@ static partial class Program
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "OwlMount", "pids");
 
-    static string GetPidFilePath(string letter) =>
-        Path.Combine(GetPidsDir(), letter.TrimEnd(':').ToUpperInvariant() + ".pid");
+    static string GetPidFilePath(string? letter) =>
+        letter != null ? Path.Combine(GetPidsDir(), letter.TrimEnd(':').ToUpperInvariant() + ".pid") : string.Empty;
 
-    static void DeletePidFile(string letter)
+    static void DeletePidFile(string? letter)
     {
+        if (letter == null) return;
         try { File.Delete(GetPidFilePath(letter)); } catch { /* best-effort */ }
     }
 
     // ── Volume size helpers ───────────────────────────────────────────────────
 
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct MEMORYSTATUSEX
+    {
+        public uint dwLength;
+        public uint dwMemoryLoad;
+        public ulong ullTotalPhys;
+        public ulong ullAvailPhys;
+        public ulong ullTotalPageFile;
+        public ulong ullAvailPageFile;
+        public ulong ullTotalVirtual;
+        public ulong ullAvailVirtual;
+        public ulong ullAvailExtendedVirtual;
+    }
+
+    [LibraryImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool GlobalMemoryStatusEx(ref MEMORYSTATUSEX lpBuffer);
+
     static (ulong? TotalSize, ulong? FreeSize) GetMemoryVolumeSpace(long? limitBytes = null)
     {
-        var gcInfo = GC.GetGCMemoryInfo();
-        if (gcInfo.TotalAvailableMemoryBytes <= 0)
-            return (null, null);
+        ulong physicalTotal = 0;
+        ulong physicalFree = 0;
 
-        ulong physicalTotal = (ulong)gcInfo.TotalAvailableMemoryBytes;
-        ulong used          = (ulong)Math.Max(GC.GetTotalMemory(forceFullCollection: false), 0L);
-        ulong physicalFree  = used >= physicalTotal ? 0 : physicalTotal - used;
+        var memStatus = new MEMORYSTATUSEX
+        {
+            dwLength = (uint)Marshal.SizeOf<MEMORYSTATUSEX>()
+        };
 
-        ulong total = limitBytes.HasValue
+        if (GlobalMemoryStatusEx(ref memStatus))
+        {
+            physicalTotal = memStatus.ullTotalPhys;
+            physicalFree = memStatus.ullAvailPhys;
+        }
+        else
+        {
+            var gcInfo = GC.GetGCMemoryInfo();
+            if (gcInfo.TotalAvailableMemoryBytes > 0)
+            {
+                physicalTotal = (ulong)gcInfo.TotalAvailableMemoryBytes;
+                ulong used = (ulong)Math.Max(GC.GetTotalMemory(forceFullCollection: false), 0L);
+                physicalFree = used >= physicalTotal ? 0 : physicalTotal - used;
+            }
+        }
+
+        if (physicalTotal == 0) return (null, null);
+
+        ulong total = limitBytes.HasValue && limitBytes.Value > 0
             ? Math.Min((ulong)limitBytes.Value, physicalTotal)
             : physicalTotal;
         ulong free  = Math.Min(physicalFree, total);
@@ -660,6 +716,35 @@ static partial class Program
         {
             return null;
         }
+    }
+
+    static string GetFirstFreeDriveLetter()
+    {
+        HashSet<string> occupied = new(StringComparer.OrdinalIgnoreCase);
+        foreach (string drive in Environment.GetLogicalDrives())
+        {
+            string? root = Path.GetPathRoot(Path.GetFullPath(drive));
+            if (string.IsNullOrWhiteSpace(root))
+                continue;
+
+            occupied.Add(root.TrimEnd('\\', ':').ToUpperInvariant());
+        }
+
+        for (char letter = 'M'; letter <= 'Z'; letter++)
+        {
+            string candidate = letter.ToString();
+            if (!occupied.Contains(candidate))
+                return candidate;
+        }
+
+        for (char letter = 'A'; letter < 'M'; letter++)
+        {
+            string candidate = letter.ToString();
+            if (!occupied.Contains(candidate))
+                return candidate;
+        }
+
+        return string.Empty;
     }
 
     static async Task<(ulong? TotalSize, ulong? FreeSize)> TryGetKuboRepositorySpaceAsync(IpfsClient client)

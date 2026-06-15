@@ -2,35 +2,47 @@ using CommunityToolkit.Mvvm.ComponentModel;
 
 namespace OwlMount.WinUI;
 
-public partial class MountEntry : ObservableObject
+public partial class MountEntry(
+    string driveLetter,
+    string label,
+    string provider,
+    string providerDisplay,
+    string state,
+    long capacityBytes,
+    long? freeBytes,
+    bool isEnabled = true) : ObservableObject
 {
-    public string DriveLetter { get; init; }
-    public string Label { get; init; }
-    public string Provider { get; init; }
-    public string ProviderDisplay { get; init; }
-    public string State { get; init; }
-    public long CapacityBytes { get; init; }
-    public bool IsEnabled { get; init; }
+    public string DriveLetter { get; init; } = driveLetter;
+    public string Label { get; init; } = label;
+    public string Provider { get; init; } = provider;
+    public string ProviderDisplay { get; init; } = providerDisplay;
+    public string State { get; init; } = state;
+    public bool IsEnabled { get; init; } = isEnabled;
+
     [ObservableProperty] public partial bool IsSelected { get; set; }
 
-    public string CapacityDisplay => CapacityBytes > 0 ? FormatBytes(CapacityBytes) : string.Empty;
+    [ObservableProperty] public partial long CapacityBytes { get; set; } = capacityBytes;
 
-    public MountEntry(string driveLetter, string label, string provider, string providerDisplay, string state, long capacityBytes, bool isEnabled = true)
+    [ObservableProperty] public partial long FreeBytes { get; set; } = freeBytes ?? 0;
+
+    public string CapacityDisplay => CapacityBytes > 0
+        ? FreeBytes > 0
+            ? $"Capacity: {FormatBytes(CapacityBytes)} total, {FormatBytes(FreeBytes)} free"
+            : $"Capacity: {FormatBytes(CapacityBytes)} total"
+        : string.Empty;
+
+    public void UpdateCapacity(long capacityBytes, long? freeBytes)
     {
-        DriveLetter = driveLetter;
-        Label = label;
-        Provider = provider;
-        ProviderDisplay = providerDisplay;
-        State = state;
         CapacityBytes = capacityBytes;
-        IsEnabled = isEnabled;
+        FreeBytes = freeBytes ?? 0;
+        OnPropertyChanged(nameof(CapacityDisplay));
     }
 
     private static string FormatBytes(long bytes) => bytes switch
     {
-        >= 1024 * 1024 * 1024 => $"Capacity: {bytes / (1024.0 * 1024 * 1024):F1} GB total",
-        >= 1024 * 1024 => $"Capacity: {bytes / (1024.0 * 1024):F1} MB total",
-        >= 1024 => $"Capacity: {bytes / 1024.0:F1} KB total",
-        _ => $"Capacity: {bytes} B total",
+        >= 1024 * 1024 * 1024 => $"{bytes / (1024.0 * 1024 * 1024):F1} GB",
+        >= 1024 * 1024 => $"{bytes / (1024.0 * 1024):F1} MB",
+        >= 1024 => $"{bytes / 1024.0:F1} KB",
+        _ => $"{bytes} B",
     };
 }

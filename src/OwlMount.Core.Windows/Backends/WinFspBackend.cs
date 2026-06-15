@@ -23,6 +23,7 @@ public sealed class WinFspBackend : IOwlMountBackend
     private readonly OwlMountFileSystem _fs;
     private FileSystemHost? _host;
     private readonly string? _volumeLabel;
+    private readonly string _fileSystemName;
 
     /// <inheritdoc/>
     public string Name => "WinFsp";
@@ -41,10 +42,12 @@ public sealed class WinFspBackend : IOwlMountBackend
         bool readOnly = false,
         ulong? totalSize = null,
         ulong? freeSize = null,
-        string? volumeLabel = null)
+        string? volumeLabel = null,
+        string? providerName = null)
     {
         IsReadOnly = readOnly;
         _volumeLabel = volumeLabel;
+        _fileSystemName = BuildFileSystemName("WinFsp", providerName);
 
         _fs = new OwlMountFileSystem(
             root, blockCache, rangeReaders, sizeProviders,
@@ -108,7 +111,7 @@ public sealed class WinFspBackend : IOwlMountBackend
         {
             _host = new FileSystemHost(_fs)
             {
-                FileSystemName           = "OwlMount",
+                FileSystemName           = _fileSystemName,
                 SectorSize               = 512,
                 SectorsPerAllocationUnit = 1,
                 MaxComponentLength       = 255,
@@ -169,4 +172,9 @@ public sealed class WinFspBackend : IOwlMountBackend
         Console.Error.WriteLine("  Download WinFsp: https://winfsp.dev/rel/");
         Console.Error.WriteLine("  After installing, restart this application.");
     }
+
+    private static string BuildFileSystemName(string backendName, string? providerName) =>
+        string.IsNullOrWhiteSpace(providerName)
+            ? $"OwlMount ({backendName})"
+            : $"OwlMount ({backendName} with {providerName.Trim()})";
 }
