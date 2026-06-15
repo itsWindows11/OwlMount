@@ -105,9 +105,9 @@ static partial class Program
                 case "--memory-size":
                 {
                     string raw = args[++i].Trim().ToUpperInvariant();
-                    if (raw.EndsWith("G") && ulong.TryParse(raw[..^1], out ulong gb))
+                    if (raw.EndsWith('G') && ulong.TryParse(raw[..^1], out ulong gb))
                         memorySizeBytes = (long)(gb * 1024UL * 1024 * 1024);
-                    else if (raw.EndsWith("M") && ulong.TryParse(raw[..^1], out ulong mb))
+                    else if (raw.EndsWith('M') && ulong.TryParse(raw[..^1], out ulong mb))
                         memorySizeBytes = (long)(mb * 1024UL * 1024);
                     else if (ulong.TryParse(raw, out ulong byteVal))
                         memorySizeBytes = (long)byteVal;
@@ -388,9 +388,8 @@ static partial class Program
                     "Error: ProjFS backend requires Windows 10 version 1803 (build 17763) or later.");
                 return 1;
             }
-#pragma warning disable CA1416 // resolved by the version check above
+
             vfsBackend = new ProjFsBackend(root, blockCache, rangeReaders, sizeProviders, isReadOnly);
-#pragma warning restore CA1416
         }
         else if (backend == OwlMountConstants.DokanyBackend)
         {
@@ -640,8 +639,8 @@ static partial class Program
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "OwlMount", "pids");
 
-    static string GetPidFilePath(string letter) =>
-        Path.Combine(GetPidsDir(), letter.TrimEnd(':').ToUpperInvariant() + ".pid");
+    static string GetPidFilePath(string? letter) =>
+        letter != null ? Path.Combine(GetPidsDir(), letter.TrimEnd(':').ToUpperInvariant() + ".pid") : string.Empty;
 
     static void DeletePidFile(string? letter)
     {
@@ -674,8 +673,11 @@ static partial class Program
         ulong physicalTotal = 0;
         ulong physicalFree = 0;
 
-        var memStatus = new MEMORYSTATUSEX();
-        memStatus.dwLength = (uint)Marshal.SizeOf<MEMORYSTATUSEX>();
+        var memStatus = new MEMORYSTATUSEX
+        {
+            dwLength = (uint)Marshal.SizeOf<MEMORYSTATUSEX>()
+        };
+
         if (GlobalMemoryStatusEx(ref memStatus))
         {
             physicalTotal = memStatus.ullTotalPhys;
