@@ -71,7 +71,8 @@ internal static class BackendAvailabilityDialog
             available:   winfspOk,
             downloadUrl: WinFspDownloadUrl,
             installNote: $"Download from {WinFspDownloadUrl} then restart OwlMount, " +
-                         "or configure the path to an existing installation in Settings."));
+                         "or configure the path to an existing installation in Settings. " +
+                         "WinFsp supports Explorer eject/unmount and OwlMount will reflect that back into the app."));
 
         // Dokany row
         panel.Children.Add(BuildBackendRow(
@@ -79,7 +80,8 @@ internal static class BackendAvailabilityDialog
             available:   dokanyOk,
             downloadUrl: DokanyDownloadUrl,
             installNote: $"Download from {DokanyDownloadUrl} then restart OwlMount, " +
-                         "or configure the path to an existing installation in Settings."));
+                         "or configure the path to an existing installation in Settings. " +
+                         "Dokany supports Explorer eject/unmount and OwlMount will reflect that back into the app."));
 
         // ProjFS row
         panel.Children.Add(BuildProjFsRow(projFsOk));
@@ -175,7 +177,8 @@ internal static class BackendAvailabilityDialog
             row.Children.Add(new TextBlock
             {
                 Text = "Windows Projected File System is a built-in optional Windows feature. " +
-                       "Enable it with the following command in an elevated PowerShell prompt, then restart:",
+                       "Enable it with the following command in an elevated PowerShell prompt, then restart. " +
+                       "ProjFS does not currently support Explorer eject/unmount in OwlMount:",
                 TextWrapping = TextWrapping.WrapWholeWords,
                 Foreground = SecondaryForegroundBrush(),
                 Margin = new Thickness(28, 0, 0, 0),

@@ -30,8 +30,11 @@ public interface IOwlMountBackend : IDisposable
     void Stop();
 
     /// <summary>
-    /// Fires when the backend stops on its own initiative (e.g. WinFsp
-    /// <c>DispatcherStopped</c> when the user ejects the drive from Explorer).
+    /// Fires when the backend stops on its own initiative.
+    /// <para>
+    /// WinFsp and Dokany surface Explorer/system ejects through this event.
+    /// ProjFS does not currently support Explorer eject in OwlMount.
+    /// </para>
     /// <para>
     /// Not all backends can detect an external unmount; implementations that cannot
     /// should document this and leave the event permanently unraised.
