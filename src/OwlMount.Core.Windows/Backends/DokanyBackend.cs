@@ -128,7 +128,7 @@ public sealed class DokanyBackend : IOwlMountBackend
                 .ConfigureOptions(options =>
                 {
                     options.MountPoint = mountPoint;
-                    options.Options = DokanOptions.FixedDrive | DokanOptions.MountManager |
+                    options.Options = DokanOptions.RemovableDrive | DokanOptions.MountManager |
                                       (IsReadOnly ? DokanOptions.WriteProtection : 0);
                     options.SectorSize = 512;
                     options.AllocationUnitSize = 512;
@@ -312,7 +312,39 @@ internal sealed class DokanyOperations : IDokanOperations
         }
     }
 
-    public void Cleanup(string fileName, IDokanFileInfo info) { }
+    public void Cleanup(string fileName, IDokanFileInfo info)
+    {
+        if (_isReadOnly || !info.DeletePending)
+            return;
+
+        try
+        {
+            string path = NormalizePath(fileName);
+            if (string.IsNullOrEmpty(path) || IsWindowsNoisePath(path))
+                return;
+
+            string parentPath = GetParentPath(path);
+            IFolder? parent = ResolveFolderOrRoot(parentPath);
+            if (parent is not IModifiableFolder modParent)
+                return;
+
+            IStorableChild? item = GetChild(parent, GetLeafName(path));
+            if (item is null)
+                return;
+
+            if (item is IFolder folder && FolderHasAnyChildren(folder))
+                return;
+
+            modParent.DeleteAsync(item).GetAwaiter().GetResult();
+            _blockCache?.Invalidate(item.Id);
+            InvalidatePath(path);
+            InvalidatePath(parentPath);
+        }
+        catch
+        {
+            // Cleanup is best-effort; Explorer has already committed to delete.
+        }
+    }
 
     public void CloseFile(string fileName, IDokanFileInfo info) => info.Context = null;
 
@@ -503,6 +535,7 @@ internal sealed class DokanyOperations : IDokanOperations
             if (IsWindowsNoisePath(path))
                 return NtStatus.ObjectNameNotFound;
 
+            info.DeletePending = true;
             string parentPath = GetParentPath(path);
             IFolder? parent = ResolveFolderOrRoot(parentPath);
             IStorableChild? item = (info.Context as IStorableChild) ?? ResolveItem(path);
@@ -532,6 +565,7 @@ internal sealed class DokanyOperations : IDokanOperations
             if (IsWindowsNoisePath(path))
                 return NtStatus.ObjectNameNotFound;
 
+            info.DeletePending = true;
             string parentPath = GetParentPath(path);
             IFolder? parent = ResolveFolderOrRoot(parentPath);
             IStorableChild? item = (info.Context as IStorableChild) ?? ResolveItem(path);
