@@ -47,7 +47,7 @@ public sealed class WinFspBackend : IOwlMountBackend
     {
         IsReadOnly = readOnly;
         _volumeLabel = volumeLabel;
-        _fileSystemName = BuildFileSystemName("WinFsp", providerName);
+        _fileSystemName = BuildFileSystemName();
 
         _fs = new OwlMountFileSystem(
             root, blockCache, rangeReaders, sizeProviders,
@@ -173,8 +173,5 @@ public sealed class WinFspBackend : IOwlMountBackend
         Console.Error.WriteLine("  After installing, restart this application.");
     }
 
-    private static string BuildFileSystemName(string backendName, string? providerName) =>
-        string.IsNullOrWhiteSpace(providerName)
-            ? $"OwlMount ({backendName})"
-            : $"OwlMount ({backendName} with {providerName.Trim()})";
+    private static string BuildFileSystemName() => "OwlMount (WinFsp)";
 }
