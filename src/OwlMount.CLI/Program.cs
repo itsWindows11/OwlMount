@@ -177,7 +177,7 @@ static partial class Program
 
                 root = new ArchiveFolder(new SystemFile(fullArchivePath));
                 displayRoot = fullArchivePath;
-                totalSize = TryGetArchiveVolumeSize(fullArchivePath);
+                (totalSize, freeSize) = TryGetPathVolumeSpace(fullArchivePath);
                 forceReadOnly = new FileInfo(fullArchivePath).IsReadOnly;
                 break;
             }
@@ -195,6 +195,7 @@ static partial class Program
 
                 root = new SystemFolder(Path.GetFullPath(resolvedPath));
                 displayRoot = path!;
+                (totalSize, freeSize) = TryGetPathVolumeSpace(resolvedPath);
                 break;
             }
 
@@ -703,18 +704,22 @@ static partial class Program
         return (total, free);
     }
 
-    static ulong? TryGetArchiveVolumeSize(string archivePath)
+    static (ulong? TotalSize, ulong? FreeSize) TryGetPathVolumeSpace(string path)
     {
         try
         {
-            string? root = Path.GetPathRoot(Path.GetFullPath(archivePath));
-            if (string.IsNullOrWhiteSpace(root)) return null;
-            long available = new DriveInfo(root).AvailableFreeSpace;
-            return available > 0 ? (ulong)available : null;
+            string? root = Path.GetPathRoot(Path.GetFullPath(path));
+            if (string.IsNullOrWhiteSpace(root)) return (null, null);
+            var drive = new DriveInfo(root);
+            if (!drive.IsReady) return (null, null);
+
+            ulong total = (ulong)Math.Max(drive.TotalSize, 0L);
+            ulong free = (ulong)Math.Max(drive.AvailableFreeSpace, 0L);
+            return (total > 0 ? total : null, free > 0 ? free : null);
         }
         catch
         {
-            return null;
+            return (null, null);
         }
     }
 

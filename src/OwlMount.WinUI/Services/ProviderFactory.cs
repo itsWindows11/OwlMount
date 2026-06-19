@@ -79,7 +79,7 @@ internal static partial class ProviderFactory
                     throw new FileNotFoundException($"Archive file not found: {fullPath}", fullPath);
 
                 root = new ArchiveFolder(new SystemFile(fullPath));
-                totalSize = TryGetArchiveVolumeSize(fullPath);
+                (totalSize, freeSize) = TryGetPathVolumeSpace(fullPath);
                 if (new System.IO.FileInfo(fullPath).IsReadOnly) forceReadOnly = true;
                 break;
             }
@@ -93,6 +93,7 @@ internal static partial class ProviderFactory
                         "A valid existing directory path is required for the 'local' provider.", nameof(opts));
 
                 root = new SystemFolder(System.IO.Path.GetFullPath(path));
+                (totalSize, freeSize) = TryGetPathVolumeSpace(path);
                 break;
             }
 
@@ -247,18 +248,22 @@ internal static partial class ProviderFactory
         return (total, free);
     }
 
-    private static ulong? TryGetArchiveVolumeSize(string archivePath)
+    private static (ulong? TotalSize, ulong? FreeSize) TryGetPathVolumeSpace(string path)
     {
         try
         {
-            string? root = System.IO.Path.GetPathRoot(System.IO.Path.GetFullPath(archivePath));
-            if (string.IsNullOrWhiteSpace(root)) return null;
-            long available = new DriveInfo(root).AvailableFreeSpace;
-            return available > 0 ? (ulong)available : null;
+            string? root = System.IO.Path.GetPathRoot(System.IO.Path.GetFullPath(path));
+            if (string.IsNullOrWhiteSpace(root)) return (null, null);
+            var drive = new DriveInfo(root);
+            if (!drive.IsReady) return (null, null);
+
+            ulong total = (ulong)Math.Max(drive.TotalSize, 0L);
+            ulong free = (ulong)Math.Max(drive.AvailableFreeSpace, 0L);
+            return (total > 0 ? total : null, free > 0 ? free : null);
         }
         catch
         {
-            return null;
+            return (null, null);
         }
     }
 
