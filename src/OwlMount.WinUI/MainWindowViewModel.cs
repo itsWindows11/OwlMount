@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.Runtime.InteropServices;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using OwlMount.Core.Windows;
 using OwlMount.WinUI.Services;
@@ -22,6 +23,7 @@ public partial class MainWindowViewModel : ObservableObject
     private Func<string?> _s3SecretProvider;
     private bool _isInitializing = true;
     private bool? _readOnlyBeforeArchive;
+    private readonly DispatcherQueue _dispatcherQueue;
     private readonly Timer _capacityRefreshTimer;
 
     public ObservableCollection<MountEntry> Mounts { get; } = [];
@@ -91,6 +93,7 @@ public partial class MainWindowViewModel : ObservableObject
         _log = log;
         _settings = settings;
         _s3SecretProvider = s3SecretProvider ?? (() => null);
+        _dispatcherQueue = DispatcherQueue.GetForCurrentThread();
 
         StatusMessage = string.Empty;
         SelectedProvider = _settings.GetSetting<string>(OwlMountConstants.DefaultProviderSettingKey);
@@ -122,7 +125,10 @@ public partial class MainWindowViewModel : ObservableObject
         ExitCommand = new RelayCommand(_exitService.Exit);
 
         RefreshMountsFromService();
-        _capacityRefreshTimer = new Timer(_ => RefreshMemoryMountCapacities(), null, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1));
+        _capacityRefreshTimer = new Timer(_ =>
+        {
+            _dispatcherQueue.TryEnqueue(RefreshMemoryMountCapacities);
+        }, null, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1));
         UpdateProviderPanels();
         _isInitializing = false;
     }
