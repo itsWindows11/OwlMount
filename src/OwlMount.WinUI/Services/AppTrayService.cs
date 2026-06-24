@@ -6,7 +6,7 @@ namespace OwlMount.WinUI.Services;
 
 public interface IAppTrayService
 {
-    void Initialize(Action showWindow, Action showSettings, Action exitApp);
+    void Initialize(Action showWindow, Action showSettings, Action exitApp, Func<bool> getRunOnStartup, Action<bool> setRunOnStartup);
     void Start();
     void NotifyMountsChanged();
     void Dispose();
@@ -18,6 +18,8 @@ public sealed class AppTrayService : IAppTrayService
     private Action? _showWindow;
     private Action? _showSettings;
     private Action? _exitApp;
+    private Func<bool> _getRunOnStartup = () => false;
+    private Action<bool> _setRunOnStartup = _ => { };
 
     private WinForms.Form? _trayPump;
     private WinForms.NotifyIcon? _trayIcon;
@@ -27,11 +29,13 @@ public sealed class AppTrayService : IAppTrayService
         _mountService = mountService;
     }
 
-    public void Initialize(Action showWindow, Action showSettings, Action exitApp)
+    public void Initialize(Action showWindow, Action showSettings, Action exitApp, Func<bool> getRunOnStartup, Action<bool> setRunOnStartup)
     {
         _showWindow = showWindow;
         _showSettings = showSettings;
         _exitApp = exitApp;
+        _getRunOnStartup = getRunOnStartup;
+        _setRunOnStartup = setRunOnStartup;
     }
 
     public void Start()
@@ -126,6 +130,14 @@ public sealed class AppTrayService : IAppTrayService
         var settingsItem = new WinForms.ToolStripMenuItem("Settings");
         settingsItem.Click += (_, _) => _showSettings?.Invoke();
         menu.Items.Add(settingsItem);
+
+        var startupItem = new WinForms.ToolStripMenuItem("Run on Windows startup")
+        {
+            CheckOnClick = true,
+            Checked = _getRunOnStartup(),
+        };
+        startupItem.CheckedChanged += (_, _) => _setRunOnStartup(startupItem.Checked);
+        menu.Items.Add(startupItem);
 
         menu.Items.Add(new WinForms.ToolStripSeparator());
 

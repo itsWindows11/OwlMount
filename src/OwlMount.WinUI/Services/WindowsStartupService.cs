@@ -10,6 +10,8 @@ public sealed class WindowsStartupService
     private const string ShortcutFileName = "OwlMount.lnk";
     private static readonly string StartupFolder = Environment.GetFolderPath(Environment.SpecialFolder.Startup);
 
+    private static readonly ComWrappers ComWrappersInstance = new StrategyBasedComWrappers();
+
     public bool IsEnabled => File.Exists(GetShortcutPath());
 
     public void SetEnabled(bool enabled)
@@ -21,44 +23,41 @@ public sealed class WindowsStartupService
             File.Delete(shortcutPath);
     }
 
-    public static string GetShortcutTargetDescription()
-        => Environment.ProcessPath ?? AppContext.BaseDirectory;
-
     private string GetShortcutPath() => Path.Combine(StartupFolder, ShortcutFileName);
 
     private void CreateShortcut(string shortcutPath)
     {
         try
         {
-            Directory.CreateDirectory(StartupFolder);
+            var clsid = new Guid("00021401-0000-0000-C000-000000000046");
+            var iid = typeof(IShellLinkW).GUID;
 
-            string targetPath = GetShortcutTargetDescription();
-            string workingDirectory = AppContext.BaseDirectory;
+            int hr = NativeMethods.CoCreateInstance(ref clsid, IntPtr.Zero, 1, ref iid, out IntPtr ptr);
+            if (hr < 0) Marshal.ThrowExceptionForHR(hr);
 
-            object shellLink = new ShellLink();
-            var shortcut = (IShellLinkW)shellLink;
-            shortcut.SetPath(targetPath);
-            shortcut.SetWorkingDirectory(workingDirectory);
-            shortcut.SetDescription("Launch OwlMount when you sign in.");
+            var wrapper = ComWrappersInstance.GetOrCreateObjectForComInstance(ptr, CreateObjectFlags.None);
 
-            ((IPersistFile)shortcut).Save(shortcutPath, true);
+            if (wrapper is IShellLinkW shortcut)
+            {
+                shortcut.SetPath(Environment.ProcessPath ?? AppContext.BaseDirectory);
+                shortcut.SetWorkingDirectory(AppContext.BaseDirectory);
+                shortcut.SetDescription("Launch OwlMount when you sign in.");
+
+                if (wrapper is IPersistFile persistFile)
+                    persistFile.Save(shortcutPath, true);
+            }
+
+            // Release the COM pointer
+            Marshal.Release(ptr);
         }
-        catch
-        {
-            // best-effort startup integration
-        }
+        catch { /* best-effort */ }
     }
 }
 
-[GeneratedComClass]
-[Guid("00021401-0000-0000-C000-000000000046")]
-[ClassInterface(ClassInterfaceType.None)]
-file sealed partial class ShellLink;
-
+// Interfaces remain as [GeneratedComInterface] for AOT support
 [GeneratedComInterface]
 [Guid("00021401-0000-0000-C000-000000000046")]
-[InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-file partial interface IShellLinkW
+internal partial interface IShellLinkW
 {
     void SetPath([MarshalAs(UnmanagedType.LPWStr)] string pszFile);
     void SetWorkingDirectory([MarshalAs(UnmanagedType.LPWStr)] string pszDir);
@@ -67,8 +66,7 @@ file partial interface IShellLinkW
 
 [GeneratedComInterface]
 [Guid("0000010b-0000-0000-C000-000000000046")]
-[InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-file partial interface IPersistFile
+internal partial interface IPersistFile
 {
     void GetClassID(out Guid pClassID);
     [PreserveSig] int IsDirty();

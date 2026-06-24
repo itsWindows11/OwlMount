@@ -42,7 +42,8 @@ public sealed class DokanyBackend : IOwlMountBackend
         bool readOnly = false,
         ulong? totalSize = null,
         ulong? freeSize = null,
-        string? volumeLabel = null)
+        string? volumeLabel = null,
+        string? providerName = null)
     {
         IsReadOnly = readOnly || root is not IModifiableFolder;
         _operations = new DokanyOperations(
@@ -53,7 +54,8 @@ public sealed class DokanyBackend : IOwlMountBackend
             IsReadOnly,
             totalSize,
             freeSize,
-            volumeLabel);
+            volumeLabel,
+            providerName);
     }
 
     /// <summary>
@@ -126,7 +128,7 @@ public sealed class DokanyBackend : IOwlMountBackend
                 .ConfigureOptions(options =>
                 {
                     options.MountPoint = mountPoint;
-                    options.Options = DokanOptions.FixedDrive | DokanOptions.MountManager |
+                    options.Options = DokanOptions.RemovableDrive | DokanOptions.MountManager |
                                       (IsReadOnly ? DokanOptions.WriteProtection : 0);
                     options.SectorSize = 512;
                     options.AllocationUnitSize = 512;
@@ -207,6 +209,7 @@ internal sealed class DokanyOperations : IDokanOperations
         "desktop.ini",
         "thumbs.db",
         "autorun.inf",
+        "$RECYCLE.BIN"
     };
 
     private readonly IFolder _root;
@@ -217,6 +220,7 @@ internal sealed class DokanyOperations : IDokanOperations
     private readonly long _totalSize;
     private readonly long _freeSize;
     private readonly string _volumeLabel;
+    private readonly string _fileSystemName;
     private readonly ConcurrentDictionary<string, IFolder> _folderCache = new(StringComparer.OrdinalIgnoreCase);
 
     public DokanyOperations(
@@ -227,7 +231,8 @@ internal sealed class DokanyOperations : IDokanOperations
         bool isReadOnly,
         ulong? totalSize,
         ulong? freeSize,
-        string? volumeLabel)
+        string? volumeLabel,
+        string? providerName = null)
     {
         _root = root;
         _blockCache = blockCache;
@@ -237,6 +242,7 @@ internal sealed class DokanyOperations : IDokanOperations
         _totalSize = (long)Math.Min(totalSize ?? (ulong)(512L * 1024 * 1024 * 1024), long.MaxValue);
         _freeSize = (long)Math.Min(freeSize ?? (ulong)(256L * 1024 * 1024 * 1024), long.MaxValue);
         _volumeLabel = string.IsNullOrWhiteSpace(volumeLabel) ? "OwlMount" : volumeLabel.Trim();
+        _fileSystemName = BuildFileSystemName("Dokany", providerName);
         _folderCache.TryAdd(string.Empty, _root);
     }
 
@@ -306,7 +312,39 @@ internal sealed class DokanyOperations : IDokanOperations
         }
     }
 
-    public void Cleanup(string fileName, IDokanFileInfo info) { }
+    public void Cleanup(string fileName, IDokanFileInfo info)
+    {
+        if (_isReadOnly || !info.DeletePending)
+            return;
+
+        try
+        {
+            string path = NormalizePath(fileName);
+            if (string.IsNullOrEmpty(path) || IsWindowsNoisePath(path))
+                return;
+
+            string parentPath = GetParentPath(path);
+            IFolder? parent = ResolveFolderOrRoot(parentPath);
+            if (parent is not IModifiableFolder modParent)
+                return;
+
+            IStorableChild? item = GetChild(parent, GetLeafName(path));
+            if (item is null)
+                return;
+
+            if (item is IFolder folder && FolderHasAnyChildren(folder))
+                return;
+
+            modParent.DeleteAsync(item).GetAwaiter().GetResult();
+            _blockCache?.Invalidate(item.Id);
+            InvalidatePath(path);
+            InvalidatePath(parentPath);
+        }
+        catch
+        {
+            // Cleanup is best-effort; Explorer has already committed to delete.
+        }
+    }
 
     public void CloseFile(string fileName, IDokanFileInfo info) => info.Context = null;
 
@@ -420,6 +458,9 @@ internal sealed class DokanyOperations : IDokanOperations
             List<FileInformation> result = [];
             foreach (IStorableChild child in folder.GetItemsAsync().ToBlockingEnumerable())
             {
+                if (WindowsNoiseFiles.Contains(child.Name))
+                    continue;
+
                 switch (child)
                 {
                     case IFolder:
@@ -491,6 +532,10 @@ internal sealed class DokanyOperations : IDokanOperations
         try
         {
             string path = NormalizePath(fileName);
+            if (IsWindowsNoisePath(path))
+                return NtStatus.ObjectNameNotFound;
+
+            info.DeletePending = true;
             string parentPath = GetParentPath(path);
             IFolder? parent = ResolveFolderOrRoot(parentPath);
             IStorableChild? item = (info.Context as IStorableChild) ?? ResolveItem(path);
@@ -517,7 +562,10 @@ internal sealed class DokanyOperations : IDokanOperations
         {
             string path = NormalizePath(fileName);
             if (string.IsNullOrEmpty(path)) return NtStatus.AccessDenied;
+            if (IsWindowsNoisePath(path))
+                return NtStatus.ObjectNameNotFound;
 
+            info.DeletePending = true;
             string parentPath = GetParentPath(path);
             IFolder? parent = ResolveFolderOrRoot(parentPath);
             IStorableChild? item = (info.Context as IStorableChild) ?? ResolveItem(path);
@@ -631,7 +679,7 @@ internal sealed class DokanyOperations : IDokanOperations
     public NtStatus GetVolumeInformation(out string volumeLabel, out FileSystemFeatures features, out string fileSystemName, out uint maximumComponentLength, IDokanFileInfo info)
     {
         volumeLabel = _volumeLabel;
-        fileSystemName = "DOKAN";
+        fileSystemName = _fileSystemName;
         maximumComponentLength = 255;
         features = FileSystemFeatures.CasePreservedNames
                  | FileSystemFeatures.UnicodeOnDisk
@@ -711,6 +759,9 @@ internal sealed class DokanyOperations : IDokanOperations
 
     private IStorableChild? GetChild(IFolder folder, string name)
     {
+        if (WindowsNoiseFiles.Contains(name))
+            return null;
+
         try
         {
             return folder.GetFirstByNameAsync(name).GetAwaiter().GetResult();
@@ -738,10 +789,14 @@ internal sealed class DokanyOperations : IDokanOperations
     {
         long length = _sizeProviders.GetProvider(file).GetSizeAsync(file).GetAwaiter().GetResult() ?? 0L;
         DateTimeOffset now = DateTimeOffset.UtcNow;
+        var attrs = _isReadOnly ? FileAttributes.ReadOnly | FileAttributes.Archive : FileAttributes.Archive;
+        if (fileName.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
+            attrs |= FileAttributes.Offline;
+
         return new FileInformation
         {
             FileName = fileName,
-            Attributes = _isReadOnly ? FileAttributes.ReadOnly | FileAttributes.Archive : FileAttributes.Archive,
+            Attributes = attrs,
             CreationTime = StorageTimestampHelper.GetCreatedAt(file)?.UtcDateTime ?? now.UtcDateTime,
             LastAccessTime = StorageTimestampHelper.GetLastAccessedAt(file)?.UtcDateTime ?? now.UtcDateTime,
             LastWriteTime = StorageTimestampHelper.GetLastModifiedAt(file)?.UtcDateTime ?? now.UtcDateTime,
@@ -783,13 +838,27 @@ internal sealed class DokanyOperations : IDokanOperations
         IAsyncEnumerator<IStorableChild> e = folder.GetItemsAsync().GetAsyncEnumerator();
         try
         {
-            return e.MoveNextAsync().ConfigureAwait(false).GetAwaiter().GetResult();
+            while (e.MoveNextAsync().ConfigureAwait(false).GetAwaiter().GetResult())
+            {
+                if (!WindowsNoiseFiles.Contains(e.Current.Name))
+                    return true;
+            }
+
+            return false;
         }
         finally
         {
             e.DisposeAsync().ConfigureAwait(false).GetAwaiter().GetResult();
         }
     }
+
+    private static bool IsWindowsNoisePath(string normalizedPath) =>
+        WindowsNoiseFiles.Contains(GetLeafName(normalizedPath));
+
+    private static string BuildFileSystemName(string backendName, string? providerName) =>
+        string.IsNullOrWhiteSpace(providerName)
+            ? $"OwlMount ({backendName})"
+            : $"OwlMount ({backendName} with {providerName.Trim()})";
 
     private void InvalidatePath(string normalizedPath)
     {

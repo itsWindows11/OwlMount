@@ -1292,6 +1292,9 @@ public sealed class OwlMountFileSystem : FileSystemBase
     private void FillFileInfo(PathIndexEntry entry, ref FileInfo fi)
     {
         fi.FileAttributes = GetFileAttributes(isDirectory: false);
+        if (entry.Name?.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) == true)
+            fi.FileAttributes |= 0x00001000u; // FILE_ATTRIBUTE_OFFLINE
+
         fi.AllocationSize = (ulong)Math.Max(entry.Size ?? 0, 0);
         fi.FileSize = (ulong)Math.Max(entry.Size ?? 0, 0);
         fi.CreationTime = ToFileTime(entry.CreatedAt);
@@ -1315,6 +1318,9 @@ public sealed class OwlMountFileSystem : FileSystemBase
 
         if (!entry.IsDirectory)
         {
+            if (entry.Name?.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) == true)
+                fi.FileAttributes |= 0x00001000u; // FILE_ATTRIBUTE_OFFLINE
+
             fi.FileSize = (ulong)Math.Max(entry.Size, 0);
             fi.AllocationSize = (ulong)Math.Max(entry.Size, 0);
         }

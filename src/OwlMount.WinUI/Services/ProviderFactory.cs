@@ -12,6 +12,7 @@ using OwlCore.Storage.NfsSharp;
 using OwlCore.Storage.SharpCompress;
 using OwlCore.Storage.System.IO;
 using OwlMount.Core.Abstractions;
+using System.Runtime.InteropServices;
 
 namespace OwlMount.WinUI.Services;
 
@@ -37,7 +38,7 @@ internal sealed class ProviderCreationResult
 /// <see cref="ProviderOptions"/>. This is an async port of the provider-selection logic
 /// from <c>OwlMount.WinFspHost/Program.cs</c> without any dependency on the console app.
 /// </summary>
-internal static class ProviderFactory
+internal static partial class ProviderFactory
 {
     public static async Task<ProviderCreationResult> CreateAsync(
         ProviderOptions opts, IFolder? existingRoot = null, CancellationToken ct = default)
@@ -55,8 +56,14 @@ internal static class ProviderFactory
         {
             // ── memory ─────────────────────────────────────────────────────────
             case "memory":
+                if (forceReadOnly)
+                    throw new ArgumentException("Memory provider cannot be read-only.", nameof(opts));
                 root = existingRoot ?? new MemoryFolder(id: "memory-root", name: "memory-root");
                 (totalSize, freeSize) = GetMemoryVolumeSpace(opts.MemorySizeLimitBytes);
+                if (opts.MemorySizeLimitBytes.HasValue && opts.MemorySizeLimitBytes.Value > 0 && freeSize.HasValue && (ulong)opts.MemorySizeLimitBytes.Value > freeSize.Value)
+                {
+                    throw new InvalidOperationException($"Not enough free physical memory. Requested: {opts.MemorySizeLimitBytes.Value} bytes, Available: {freeSize.Value} bytes.");
+                }
                 break;
 
             // ── archive ────────────────────────────────────────────────────────
@@ -72,8 +79,8 @@ internal static class ProviderFactory
                     throw new FileNotFoundException($"Archive file not found: {fullPath}", fullPath);
 
                 root = new ArchiveFolder(new SystemFile(fullPath));
-                totalSize = TryGetArchiveVolumeSize(fullPath);
-                forceReadOnly = true;
+                (totalSize, freeSize) = TryGetPathVolumeSpace(fullPath);
+                if (new System.IO.FileInfo(fullPath).IsReadOnly) forceReadOnly = true;
                 break;
             }
 
@@ -86,6 +93,7 @@ internal static class ProviderFactory
                         "A valid existing directory path is required for the 'local' provider.", nameof(opts));
 
                 root = new SystemFolder(System.IO.Path.GetFullPath(path));
+                (totalSize, freeSize) = TryGetPathVolumeSpace(path);
                 break;
             }
 
@@ -190,33 +198,72 @@ internal static class ProviderFactory
 
     // ── Volume size helpers ──────────────────────────────────────────────────
 
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct MEMORYSTATUSEX
+    {
+        public uint dwLength;
+        public uint dwMemoryLoad;
+        public ulong ullTotalPhys;
+        public ulong ullAvailPhys;
+        public ulong ullTotalPageFile;
+        public ulong ullAvailPageFile;
+        public ulong ullTotalVirtual;
+        public ulong ullAvailVirtual;
+        public ulong ullAvailExtendedVirtual;
+    }
+
+    [LibraryImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool GlobalMemoryStatusEx(ref MEMORYSTATUSEX lpBuffer);
+
     private static (ulong? TotalSize, ulong? FreeSize) GetMemoryVolumeSpace(long? limitBytes = null)
     {
-        var gcInfo = GC.GetGCMemoryInfo();
-        if (gcInfo.TotalAvailableMemoryBytes <= 0)
-            return (null, null);
+        ulong physicalTotal = 0;
+        ulong physicalFree = 0;
 
-        ulong physicalTotal = (ulong)gcInfo.TotalAvailableMemoryBytes;
+        var memStatus = new MEMORYSTATUSEX();
+        memStatus.dwLength = (uint)Marshal.SizeOf<MEMORYSTATUSEX>();
+        if (GlobalMemoryStatusEx(ref memStatus))
+        {
+            physicalTotal = memStatus.ullTotalPhys;
+            physicalFree = memStatus.ullAvailPhys;
+        }
+        else
+        {
+            var gcInfo = GC.GetGCMemoryInfo();
+            if (gcInfo.TotalAvailableMemoryBytes > 0)
+            {
+                physicalTotal = (ulong)gcInfo.TotalAvailableMemoryBytes;
+                ulong used = (ulong)Math.Max(GC.GetTotalMemory(forceFullCollection: false), 0L);
+                physicalFree = used >= physicalTotal ? 0 : physicalTotal - used;
+            }
+        }
+
+        if (physicalTotal == 0) return (null, null);
+
         ulong total = limitBytes.HasValue && limitBytes.Value > 0
             ? (ulong)Math.Min(limitBytes.Value, (long)physicalTotal)
             : physicalTotal;
-        ulong used = (ulong)Math.Max(GC.GetTotalMemory(forceFullCollection: false), 0L);
-        ulong free = used >= total ? 0 : total - used;
+        ulong free = Math.Min(physicalFree, total);
         return (total, free);
     }
 
-    private static ulong? TryGetArchiveVolumeSize(string archivePath)
+    private static (ulong? TotalSize, ulong? FreeSize) TryGetPathVolumeSpace(string path)
     {
         try
         {
-            string? root = System.IO.Path.GetPathRoot(System.IO.Path.GetFullPath(archivePath));
-            if (string.IsNullOrWhiteSpace(root)) return null;
-            long available = new DriveInfo(root).AvailableFreeSpace;
-            return available > 0 ? (ulong)available : null;
+            string? root = System.IO.Path.GetPathRoot(System.IO.Path.GetFullPath(path));
+            if (string.IsNullOrWhiteSpace(root)) return (null, null);
+            var drive = new DriveInfo(root);
+            if (!drive.IsReady) return (null, null);
+
+            ulong total = (ulong)Math.Max(drive.TotalSize, 0L);
+            ulong free = (ulong)Math.Max(drive.AvailableFreeSpace, 0L);
+            return (total > 0 ? total : null, free > 0 ? free : null);
         }
         catch
         {
-            return null;
+            return (null, null);
         }
     }
 

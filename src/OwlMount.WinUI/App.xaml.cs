@@ -69,7 +69,12 @@ public partial class App : Application
         _window.AppWindow.Closing += OnWindowClosing;
         _window.Activate();
 
-        AppTrayService.Initialize(ShowWindow, ShowSettings, ExitApp);
+        AppTrayService.Initialize(
+            ShowWindow,
+            ShowSettings,
+            ExitApp,
+            () => Services.GetRequiredService<WindowsStartupService>().IsEnabled,
+            enabled => Services.GetRequiredService<WindowsStartupService>().SetEnabled(enabled));
         AppTrayService.Start();
         _ = RestoreConfiguredMountsAsync();
         _ = ShowBackendAvailabilityIfNeededAsync();

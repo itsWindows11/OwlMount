@@ -184,7 +184,8 @@ public sealed class MountService : IDisposable
                     readOnly: isReadOnly,
                     totalSize: pr.TotalSize,
                     freeSize: pr.FreeSize,
-                    volumeLabel: resolvedLabel);
+                    volumeLabel: resolvedLabel,
+                    providerName: normalizedOpts.Provider);
             }
             else if (selectedBackend == OwlMountConstants.WinFspBackend)
             {
@@ -193,7 +194,8 @@ public sealed class MountService : IDisposable
                     readOnly: isReadOnly,
                     totalSize: pr.TotalSize,
                     freeSize: pr.FreeSize,
-                    volumeLabel: resolvedLabel);
+                    volumeLabel: resolvedLabel,
+                    providerName: normalizedOpts.Provider);
             }
             else
             {
